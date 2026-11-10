@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "version": "v1.0.0",
+  "files": [
+    {
+      "path": ".github/standard/standard_sync.py",
+      "kind": "exact",
+      "critical": true,
+      "sha256": "51825f155db5b8674ba567ae95066f0ef31c2f1553de495b4a5b4dae8df47c3e"
+    },
+    {
+      "path": ".github/standard/common/params.py",
+      "kind": "exact",
+      "critical": true,
+      "sha256": "c55b4077221a62eed019af722383eef623bc484d46620776f32406492b261b11"
+    },
+    {
+      "path": ".github/repo-standard.json",
+      "kind": "param"
+    }
+  ]
+}

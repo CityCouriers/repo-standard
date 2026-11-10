@@ -1,0 +1,41 @@
+name: CI
+
+# Testy i spójność manifestu repozytorium wzorca. Biegnie z gałęzi PR (zwykły `pull_request`), więc
+# nie jest dowodem zaufania do kodu bramek: tę rolę pełni review-gate z domyślnej gałęzi.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+
+      - name: Testy jednostkowe
+        run: python -m unittest discover -s tests -v
+
+      - name: Manifest zgodny z plikami wzorca
+        run: python .github/standard/standard_sync.py check --self
