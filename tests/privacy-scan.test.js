@@ -8,7 +8,8 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const h = require('./helpers');
 
-const SCRIPT = path.join(h.REPO_ROOT, 'scripts', 'ci', 'privacy-scan.sh');
+// PRIVACY_SCAN_SCRIPT pozwala uruchomić testy przeciw starszej wersji skryptu (dowód RED).
+const SCRIPT = process.env.PRIVACY_SCAN_SCRIPT || path.join(h.REPO_ROOT, 'scripts', 'ci', 'privacy-scan.sh');
 const probe = spawnSync('bash', ['--version'], { encoding: 'utf8' });
 const SKIP = probe.status === 0 ? false : 'brak bash';
 const SYNTHETIC_NAME = ['Zyx', 'wv', '-Synt', 'Name'].join('');
@@ -116,4 +117,120 @@ test('--log z błędnym zakresem i nieznany argument to kod 2', { skip: SKIP }, 
   const { dir } = makeRepo(t);
   assert.equal(scan(dir, ['--log', 'nie-ma-takiej-rewizji..HEAD']).code, 2);
   assert.equal(scan(dir, ['--zly']).code, 2);
+});
+
+// --- Poprawki po audycie PR #4 -----------------------------------------------------------------
+
+const LEAK = {
+  'ścieżka lokalna': { value: ['C', ':\\Us', 'ers\\ktos\\x'].join(''), secrets: ['ktos'] },
+  'katalog domowy': { value: ['/ho', 'me/ktos/x'].join(''), secrets: ['ktos'] },
+  'adres e-mail': { value: ['osoba', '@', 'firma-testowa.pl'].join(''), secrets: ['osoba', 'firma-testowa'] },
+  'identyfikator zgłoszenia': { value: ['org-test/prywatne-repo', '#', '123'].join(''), secrets: ['org-test', 'prywatne-repo'] },
+  'adres zgłoszenia': { value: `https://${['github', '.com/org-test/prywatne-repo/issues/', '123'].join('')}`, secrets: ['org-test', 'prywatne-repo'] },
+};
+
+for (const [label, { value, secrets }] of Object.entries(LEAK)) {
+  test(`wyjście nie ujawnia wartości ani otoczenia trafienia: ${label}`, { skip: SKIP }, (t) => {
+    const { dir } = makeRepo(t);
+    fs.writeFileSync(path.join(dir, 'zly.txt'), `linia zero\nOTOCZENIEPRZED ${value} OTOCZENIEPO\n`);
+    const result = scan(dir);
+    assert.equal(result.code, 1, result.out);
+    assert.match(result.out, /zly\.txt:2/);
+    for (const secret of [...secrets, 'OTOCZENIE', 'linia zero']) {
+      assert.equal(result.out.toLowerCase().includes(secret.toLowerCase()), false, `w wyjściu jest "${secret}": ${result.out}`);
+    }
+  });
+}
+
+test('skan obejmuje sam skaner: syntetyczny identyfikator, adres e-mail i ścieżka w skrypcie dają kod 1 bez wycieku', { skip: SKIP }, (t) => {
+  const cases = {
+    identyfikator: ['# zob. org-test/prywatne-repo', '#', '5'].join(''),
+    'adres e-mail': ['# kontakt: osoba', '@', 'firma-testowa.pl'].join(''),
+    'ścieżka': ['# ', 'C', ':\\Us', 'ers\\ktos'].join(''),
+  };
+  for (const [label, line] of Object.entries(cases)) {
+    const { dir } = makeRepo(t);
+    const script = path.join(dir, 'scripts', 'ci', 'privacy-scan.sh');
+    fs.appendFileSync(script, `\n${line}\n`);
+    const result = scan(dir);
+    assert.equal(result.code, 1, `${label}: ${result.out}`);
+    assert.match(result.out, /scripts\/ci\/privacy-scan\.sh:\d+/, label);
+    assert.doesNotMatch(result.out, /prywatne-repo|firma-testowa|ktos/, `${label}: wyciek`);
+  }
+});
+
+test('skan obejmuje sam skaner: nazwa z pliku wzorców w skrypcie daje kod 1', { skip: SKIP }, (t) => {
+  const { dir } = makeRepo(t);
+  fs.appendFileSync(path.join(dir, 'scripts', 'ci', 'privacy-scan.sh'), `\n# ${SYNTHETIC_NAME}\n`);
+  const external = h.tmpDir();
+  t.after(() => h.rmDir(external));
+  const patterns = path.join(external, 'wzorce.txt');
+  fs.writeFileSync(patterns, `${SYNTHETIC_NAME}\n`);
+  const result = scan(dir, [], { PRIVACY_PATTERNS_FILE: patterns });
+  assert.equal(result.code, 1, result.out);
+  assert.match(result.out, /privacy-scan\.sh:\d+/);
+});
+
+function shimDir(t, scripts) {
+  const dir = h.tmpDir();
+  t.after(() => h.rmDir(dir));
+  for (const [name, body] of Object.entries(scripts)) {
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, `#!/usr/bin/env bash\n${body}\n`);
+    fs.chmodSync(file, 0o755);
+  }
+  return dir;
+}
+
+const withShim = (dir) => ({ PATH: `${dir}${path.delimiter}${process.env.PATH}` });
+
+test('fail-closed: błąd git ls-files to kod 2, nie OK', { skip: SKIP }, (t) => {
+  const { dir } = makeRepo(t);
+  const shim = shimDir(t, { git: 'exit 1' });
+  const result = scan(dir, [], withShim(shim));
+  assert.equal(result.code, 2, result.out);
+  assert.doesNotMatch(result.out, /^OK/m);
+});
+
+test('fail-closed: błąd grep na wybranym pliku (kod 2) to kod 2, nie OK', { skip: SKIP }, (t) => {
+  const { dir } = makeRepo(t);
+  fs.writeFileSync(path.join(dir, 'zepsuty.txt'), 'czysty\n');
+  // Pierwszy grep w PATH to atrapa; reszta wywołań idzie do prawdziwego grep.
+  const shim = shimDir(t, {
+    grep: 'for a in "$@"; do [ "$a" = "zepsuty.txt" ] && { echo "grep: zepsuty.txt: blad" >&2; exit 2; }; done\nreal="$(type -ap grep | sed -n 2p)"\nexec "$real" "$@"',
+  });
+  const result = scan(dir, [], withShim(shim));
+  assert.equal(result.code, 2, result.out);
+  assert.doesNotMatch(result.out, /^OK/m);
+});
+
+test('fail-closed: błąd grep przy skanie commitów (--log) to kod 2', { skip: SKIP }, (t) => {
+  const { dir, git } = makeRepo(t);
+  git('add', '-A');
+  assert.equal(git('commit', '-q', '-m', 'czysty komunikat').status, 0);
+  const shim = shimDir(t, {
+    grep: 'for a in "$@"; do [ "$a" = "-q" ] && exit 2; done\nreal="$(type -ap grep | sed -n 2p)"\nexec "$real" "$@"',
+  });
+  const result = scan(dir, ['--log', 'HEAD'], withShim(shim));
+  assert.equal(result.code, 2, result.out);
+  assert.doesNotMatch(result.out, /^OK/m);
+});
+
+test('fail-closed: nieczytelny plik to kod 2', { skip: SKIP || process.platform === 'win32' || (process.getuid && process.getuid() === 0) ? 'brak chmod lub root' : false }, (t) => {
+  const { dir } = makeRepo(t);
+  const file = path.join(dir, 'zamkniety.txt');
+  fs.writeFileSync(file, 'czysty\n');
+  fs.chmodSync(file, 0o000);
+  t.after(() => fs.chmodSync(file, 0o644));
+  const result = scan(dir);
+  assert.equal(result.code, 2, result.out);
+});
+
+test('fail-closed: uszkodzone dowiązanie i nazwa z dwukropkiem to kod 2', { skip: SKIP || process.platform === 'win32' ? 'brak dowiązań lub dwukropków w nazwach' : false }, (t) => {
+  const { dir } = makeRepo(t);
+  fs.symlinkSync(path.join(dir, 'nie-ma-celu'), path.join(dir, 'zerwane'));
+  assert.equal(scan(dir).code, 2);
+  fs.rmSync(path.join(dir, 'zerwane'));
+  fs.writeFileSync(path.join(dir, 'a:b.txt'), 'x\n');
+  assert.equal(scan(dir).code, 2);
 });
