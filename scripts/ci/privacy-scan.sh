@@ -80,7 +80,10 @@ home_dir='(^|[^A-Za-z0-9_.-])/(home|Users)/[A-Za-z0-9_.-]+/'
 issue_ref='[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+'
 issue_url='github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/(issues|pull)/[0-9]+'
 email_re='[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
-email_ok='(noreply|no-reply|@users\.noreply\.github\.com|@example\.(com|org|net)|@anthropic\.com)'
+# Allowlista CAŁYCH adresów, zakotwiczona (dopasowanie po zamianie na małe litery): dowolna część lokalna
+# w domenach users.noreply.github.com i example.com/org/net oraz dokładnie dwa adresy noreply.
+# Samo słowo noreply w części lokalnej obcej domeny nie zwalnia adresu.
+email_ok='^([a-z0-9._%+-]+@users\.noreply\.github\.com|[a-z0-9._%+-]+@example\.(com|org|net)|noreply@anthropic\.com|noreply@github\.com)$'
 
 # Wypisuje plik:wiersz bez treści (nazwy plików nie zawierają dwukropka, patrz wyżej).
 locations_only() { cut -d: -f1,2 | sort -u; }

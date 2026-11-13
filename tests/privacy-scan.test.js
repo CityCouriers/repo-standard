@@ -234,3 +234,63 @@ test('fail-closed: uszkodzone dowiązanie i nazwa z dwukropkiem to kod 2', { ski
   fs.writeFileSync(path.join(dir, 'a:b.txt'), 'x\n');
   assert.equal(scan(dir).code, 2);
 });
+
+// --- Allowlista e-mail: pełne adresy, zakotwiczona (reaudyt PR #4) -----------------------------
+
+const EVIL_EMAILS = [
+  ['account-noreply', '@', 'private.test'].join(''),
+  ['test', '@', 'example.com.evil'].join(''),
+  ['no-reply', '@', 'firma-testowa.pl'].join(''),
+  ['x', '@', 'users.noreply.github.com.evil'].join(''),
+  ['noreply', '@', 'anthropic.com.evil'].join(''),
+  ['x', '@', 'notexample.com'].join(''),
+];
+
+const GOOD_EMAILS = [
+  ['noreply', '@', 'anthropic.com'].join(''),
+  ['12345+osoba', '@', 'users.noreply.github.com'].join(''),
+  ['Osoba', '@', 'Example.COM'].join(''),
+  ['a.b', '@', 'example.org'].join(''),
+  ['x', '@', 'example.net'].join(''),
+  ['noreply', '@', 'github.com'].join(''),
+];
+
+test('e-mail spoza allowlisty (także z "noreply" w części lokalnej i obcą domeną) to kod 1 bez wycieku, w plikach', { skip: SKIP }, (t) => {
+  for (const mail of EVIL_EMAILS) {
+    const { dir } = makeRepo(t);
+    fs.writeFileSync(path.join(dir, 'mail.txt'), `OTOCZENIE ${mail} OTOCZENIE\n`);
+    const result = scan(dir);
+    assert.equal(result.code, 1, `${mail}: ${result.out}`);
+    assert.match(result.out, /mail\.txt:1/);
+    assert.doesNotMatch(result.out, /private\.test|evil|firma-testowa|notexample|OTOCZENIE/i, `wyciek dla ${mail}`);
+  }
+});
+
+test('e-mail spoza allowlisty w komunikacie commita i w metadanych autora (--log) to kod 1, tylko kategoria', { skip: SKIP }, (t) => {
+  for (const mail of EVIL_EMAILS) {
+    const { dir, git } = makeRepo(t);
+    git('add', '-A');
+    assert.equal(git('commit', '-q', '-m', `opis ${mail} koniec`).status, 0);
+    const result = scan(dir, ['--log', 'HEAD']);
+    assert.equal(result.code, 1, `${mail}: ${result.out}`);
+    assert.match(result.out, /adres e-mail/);
+    assert.doesNotMatch(result.out, /private\.test|evil|firma-testowa|notexample|opis|koniec/i, `wyciek dla ${mail}`);
+  }
+  const { dir, git } = makeRepo(t);
+  git('add', '-A');
+  const author = spawnSync('git', ['-c', 'user.name=Test', '-c', `user.email=${EVIL_EMAILS[0]}`, 'commit', '-q', '-m', 'czysty'], { cwd: dir, encoding: 'utf8' });
+  assert.equal(author.status, 0, author.stderr);
+  const result = scan(dir, ['--log', 'HEAD']);
+  assert.equal(result.code, 1, result.out);
+  assert.doesNotMatch(result.out, /private\.test/);
+});
+
+test('dozwolone adresy (noreply Anthropic i GitHub, *@users.noreply.github.com, *@example.com/org/net) przechodzą w plikach i w --log', { skip: SKIP }, (t) => {
+  const { dir, git } = makeRepo(t);
+  fs.writeFileSync(path.join(dir, 'ok-mail.txt'), `${GOOD_EMAILS.join('\n')}\n`);
+  assert.equal(scan(dir).code, 0);
+  git('add', '-A');
+  assert.equal(git('commit', '-q', '-m', `autor\n\nCo-Authored-By: Ktos <${GOOD_EMAILS.join('> <')}>`).status, 0);
+  const result = scan(dir, ['--log', 'HEAD']);
+  assert.equal(result.code, 0, result.out);
+});

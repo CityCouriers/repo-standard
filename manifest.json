@@ -18,7 +18,7 @@
       "path": "scripts/ci/privacy-scan.sh",
       "kind": "exact",
       "critical": true,
-      "sha256": "bc3a2b2bbb788320745851f39fb34184f5c9594c163da3060d35df8e560d3742"
+      "sha256": "9b941146761b605fabde9f7eec4c41ccfbba0f3cfa4c2d9c2464e1796df049ff"
     },
     {
       "path": ".github/repo-standard.json",
