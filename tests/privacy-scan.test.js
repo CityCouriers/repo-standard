@@ -216,14 +216,47 @@ test('fail-closed: błąd grep przy skanie commitów (--log) to kod 2', { skip: 
   assert.doesNotMatch(result.out, /^OK/m);
 });
 
+/**
+ * Ustawia tryb pliku na czas wywołania fn i ZAWSZE przywraca poprzedni tryb zaraz po nim (także gdy fn rzuci),
+ * czyli przed sprzątaniem sandboxa: hook t.after z makeRepo kasuje katalog, a późniejszy t.after z chmod
+ * trafiał już w nieistniejący plik (ENOENT). Brak pliku przy przywracaniu jest tolerowany, każdy inny błąd chmod
+ * jest rzucany.
+ */
+function withMode(file, mode, fn) {
+  const previous = fs.statSync(file).mode & 0o777;
+  fs.chmodSync(file, mode);
+  try {
+    return fn();
+  } finally {
+    try {
+      fs.chmodSync(file, previous);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+}
+
+test('withMode przywraca tryb po sukcesie i po wyjątku, a plik usunięty w fn nie zagłusza wyniku', (t) => {
+  const dir = h.tmpDir();
+  t.after(() => h.rmDir(dir));
+  const file = path.join(dir, 'p.txt');
+  fs.writeFileSync(file, 'x\n');
+  const before = fs.statSync(file).mode & 0o777;
+  assert.equal(withMode(file, 0o000, () => 'wynik'), 'wynik');
+  assert.equal(fs.statSync(file).mode & 0o777, before, 'tryb wraca po sukcesie');
+  assert.throws(() => withMode(file, 0o000, () => { throw new Error('boom'); }), /boom/);
+  assert.equal(fs.statSync(file).mode & 0o777, before, 'tryb wraca mimo wyjątku');
+  assert.equal(withMode(file, 0o000, () => { fs.rmSync(file); return 'usuniety'; }), 'usuniety', 'ENOENT przy przywracaniu jest tolerowany');
+});
+
 test('fail-closed: nieczytelny plik to kod 2', { skip: SKIP || process.platform === 'win32' || (process.getuid && process.getuid() === 0) ? 'brak chmod lub root' : false }, (t) => {
   const { dir } = makeRepo(t);
   const file = path.join(dir, 'zamkniety.txt');
   fs.writeFileSync(file, 'czysty\n');
-  fs.chmodSync(file, 0o000);
-  t.after(() => fs.chmodSync(file, 0o644));
-  const result = scan(dir);
+  const before = fs.statSync(file).mode & 0o777;
+  const result = withMode(file, 0o000, () => scan(dir));
   assert.equal(result.code, 2, result.out);
+  assert.equal(fs.statSync(file).mode & 0o777, before, 'tryb przywrócony przed sprzątaniem sandboxa');
 });
 
 test('fail-closed: uszkodzone dowiązanie i nazwa z dwukropkiem to kod 2', { skip: SKIP || process.platform === 'win32' ? 'brak dowiązań lub dwukropków w nazwach' : false }, (t) => {
