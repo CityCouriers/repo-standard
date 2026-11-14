@@ -12,8 +12,9 @@ const SCHEMA = 1;
 const TOP_KEYS = ['schema', 'standard', 'audit', 'triage', 'quality_gate', 'review_gate', 'overrides'];
 const VERSION = /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 const FULL_SHA = /^[0-9a-f]{40}$/;
-const ISO_UTC = /^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})Z$/;
-const ISO_DATE = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/;
+// Wzorce dat wyłącznie wyciągają składniki; kształt całego napisu rozstrzyga porównanie z zapisem odtworzonym z `Date`.
+const ISO_UTC = /([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})Z/;
+const ISO_DATE = /([0-9]{4})-([0-9]{2})-([0-9]{2})/;
 const ISSUE_REF = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#[1-9][0-9]*$/;
 const WORKFLOW_FILE = /^[A-Za-z0-9_.-]+\.ya?ml$/;
 const EVENTS = ['pull_request', 'push', 'workflow_dispatch'];
@@ -38,24 +39,24 @@ function parseVersion(value) {
   return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
 }
 
-/** Milisekundy UTC dla poprawnej daty kalendarzowej (z rzeczywistym sprawdzeniem dnia i godziny) albo null. */
-function instantMs(value, pattern, withTime) {
+/**
+ * Milisekundy UTC dla poprawnej daty kalendarzowej albo null. Poprawność to równość napisu z zapisem odtworzonym
+ * z `Date` (`render`): 30 lutego, godzina 24, zbędny prefiks albo sufiks dają inny zapis niż oryginał.
+ */
+function instantMs(value, pattern, render) {
   const match = typeof value === 'string' ? pattern.exec(value) : null;
   if (!match) return null;
-  const [year, month, day, hour, minute, second] = match.slice(1).map((part) => (part === undefined ? 0 : Number(part)));
-  const ms = Date.UTC(year, month - 1, day, withTime ? hour : 0, withTime ? minute : 0, withTime ? second : 0);
-  const back = new Date(ms);
-  const same = back.getUTCFullYear() === year && back.getUTCMonth() === month - 1 && back.getUTCDate() === day &&
-    (!withTime || (back.getUTCHours() === hour && back.getUTCMinutes() === minute && back.getUTCSeconds() === second));
-  return same ? ms : null;
+  const [year, month, day, hour = 0, minute = 0, second = 0] = match.slice(1).map(Number);
+  const ms = Date.UTC(year, month - 1, day, hour, minute, second);
+  return render(new Date(ms).toISOString()) === value ? ms : null;
 }
 
-const validInstant = (value) => instantMs(value, ISO_UTC, true) !== null;
-const dateMs = (value) => instantMs(value, ISO_DATE, false);
+const validInstant = (value) => instantMs(value, ISO_UTC, (iso) => `${iso.slice(0, 19)}Z`) !== null;
+const dateMs = (value) => instantMs(value, ISO_DATE, (iso) => iso.slice(0, 10));
 
 /** Ścieżka względna w repo: segmenty niepuste i bez `.`/`..`, bez `\`, `:` i znaków sterujących. */
 function safeRelative(path) {
-  if (typeof path !== 'string' || path === '' || path !== path.trim()) return false;
+  if (typeof path !== 'string' || path !== path.trim()) return false;
   if (path.includes('\\') || path.includes(':')) return false;
   if ([...path].some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return false;
   return path.split('/').every((part) => part !== '' && part !== '.' && part !== '..');
@@ -199,7 +200,7 @@ function validateWithManifest(params, manifest, todayMs) {
 function parseJsonObject(text) {
   let pos = 0;
   const fail = (message) => { throw new SyntaxError(`${message} (pozycja ${pos})`); };
-  const skip = () => { while (pos < text.length && ' \t\r\n'.includes(text[pos])) pos += 1; };
+  const skip = () => { while (pos < text.length && ' \t\r\n'.includes(text.charAt(pos))) pos += 1; };
   const literal = (word, value) => {
     if (text.startsWith(word, pos)) { pos += word.length; return value; }
     return fail('nieoczekiwany znak');

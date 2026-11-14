@@ -64,6 +64,13 @@ function textOf(data) {
   }
 }
 
+/** Tekst UTF-8 albo SyncError z nazwą źródła (zamiast cichej podmiany na pusty napis). */
+function requireText(data, what) {
+  const text = textOf(data);
+  if (text === null) throw new SyncError(`${what}: nie jest poprawnym UTF-8`);
+  return text;
+}
+
 // ---------------------------------------------------------------- bloki
 
 /** Tekst między znacznikami bloku (każdy wiersz z `\n`); null, gdy znaczników nie ma dokładnie po jednym. */
@@ -189,6 +196,17 @@ function listFiles(base) {
   });
 }
 
+/** Plik parametrów konsumenta jako obiekt; zły UTF-8, JSON albo schemat to SyncError (kod 2). */
+function loadConsumerParams(data) {
+  const text = requireText(data, params.PARAMS_PATH);
+  try {
+    return params.load(text);
+  } catch (error) {
+    if (error instanceof params.ParamsError) throw new SyncError(`plik parametrów niepoprawny: ${error.message}`);
+    throw error;
+  }
+}
+
 /** Odstępstwa z lokalnego pliku parametrów względem manifestu: { findings, notes }. */
 function localOverrides(manifest, paramsText, todayMs) {
   let loaded;
@@ -273,7 +291,7 @@ function makeHttpGet({ ca, timeoutMs = 30000 } = {}) {
         if (redirects >= MAX_REDIRECTS) return reject(new SyncError(`za dużo przekierowań: ${url}`));
         const location = response.headers.location;
         if (!location) return reject(new SyncError(`przekierowanie bez adresu: ${url}`));
-        return get(new URL(location, parsed).href, origin === undefined ? parsed.host : origin, redirects + 1).then(resolve, reject);
+        return get(new URL(location, parsed).href, origin ?? parsed.host, redirects + 1).then(resolve, reject);
       }
       if (status !== 200) {
         response.resume();
@@ -307,12 +325,13 @@ function rawUrl(endpoints, repo, sha, relPath) {
 }
 
 async function fetchManifest(endpoints, repo, sha, fetch) {
-  return parseManifest(textOf(await fetch(rawUrl(endpoints, repo, sha, MANIFEST_PATH))) ?? '');
+  return parseManifest(requireText(await fetch(rawUrl(endpoints, repo, sha, MANIFEST_PATH)), MANIFEST_PATH));
 }
 
 function parseApiObject(data, what) {
+  const text = requireText(data, `odpowiedź API (${what})`);
   try {
-    const value = JSON.parse(textOf(data) ?? '');
+    const value = JSON.parse(text);
     if (!isObject(value)) throw new Error('nie jest obiektem');
     return value;
   } catch (error) {
@@ -365,18 +384,19 @@ function assertPlainPath(realRoot, relPath) {
 
 /**
  * Zapis przez plik tymczasowy w tym samym katalogu i rename, z ponowną kontrolą bezpośrednio przed rename.
- * Plik tymczasowy jest otwierany z O_EXCL (a tam, gdzie platforma wspiera, z O_NOFOLLOW), a rename podmienia sam
- * wpis katalogu, więc dowiązanie podstawione w miejsce pliku docelowego nie jest dereferencjonowane.
+ * Plik tymczasowy jest otwierany z O_CREAT|O_EXCL (otwarcie nie podąża za dowiązaniem pod tą nazwą), a rename
+ * podmienia sam wpis katalogu, więc dowiązanie podstawione w miejsce pliku docelowego nie jest dereferencjonowane.
  */
-function writeAtomic(realRoot, relPath, content, hooks, phase, created = []) {
+function writeAtomic(realRoot, relPath, content, hooks, phase, created) {
   assertPlainPath(realRoot, relPath);
   const parts = relPath.split('/');
   const target = path.join(realRoot, ...parts);
   const dir = path.dirname(target);
   mkdirTracked(dir, created);
+  if (hooks && hooks.afterMkdir) hooks.afterMkdir(relPath, phase);
   assertPlainPath(realRoot, relPath);
   const temp = path.join(dir, `.${parts[parts.length - 1]}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`);
-  const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0);
+  const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL;
   const fd = fs.openSync(temp, flags, 0o644);
   try {
     try {
@@ -398,12 +418,12 @@ function writeAtomic(realRoot, relPath, content, hooks, phase, created = []) {
   }
 }
 
-/** mkdir -p, który zapamiętuje utworzone katalogi (od zewnętrznego), żeby można je było sprzątnąć po awarii. */
+/** mkdir -p, który (gdy podano `created`) zapamiętuje utworzone katalogi od zewnętrznego, żeby sprzątnąć je po awarii. */
 function mkdirTracked(dir, created) {
   const missing = [];
   for (let current = dir; !fs.existsSync(current); current = path.dirname(current)) missing.unshift(current);
   fs.mkdirSync(dir, { recursive: true });
-  created.push(...missing);
+  if (created !== undefined) created.push(...missing);
 }
 
 function removeCreatedDirs(created) {
@@ -523,17 +543,7 @@ async function runApply(args, env, deps) {
 
   assertPlainPath(root, params.PARAMS_PATH);
   const paramsData = readPlainFile(root, params.PARAMS_PATH);
-  let paramsValue;
-  if (paramsData === null) {
-    paramsValue = defaultParams();
-  } else {
-    try {
-      paramsValue = params.load(textOf(paramsData) ?? '\u0000');
-    } catch (error) {
-      if (error instanceof params.ParamsError) throw new SyncError(`plik parametrów niepoprawny: ${error.message}`);
-      throw error;
-    }
-  }
+  const paramsValue = paramsData === null ? defaultParams() : loadConsumerParams(paramsData);
   const { errors, notes: overrideNotes } = params.overrideFindings(manifest, paramsValue.overrides, deps.todayMs);
   if (errors.length) throw new SyncError(`odstępstwa w pliku parametrów niepoprawne: ${errors.join('; ')}`);
 
@@ -557,7 +567,7 @@ async function runCheck(args, env, deps) {
   if (args.self) {
     const manifestData = readPlainFile(root, MANIFEST_PATH);
     if (manifestData === null) throw new SyncError(`brak ${MANIFEST_PATH}`);
-    const manifest = parseManifest(textOf(manifestData) ?? '');
+    const manifest = parseManifest(requireText(manifestData, MANIFEST_PATH));
     const { findings, notes } = checkSelf(manifest, root, deps.todayMs);
     report(`standard_sync check --self: ${findings.length ? 'rozjazd' : 'zgodne'}`,
       [...findings, ...notes, ...(findings.length ? [] : [`${manifest.files.length} plików manifestu ${manifest.version}`])], env);
@@ -565,13 +575,7 @@ async function runCheck(args, env, deps) {
   }
   const paramsData = readPlainFile(root, params.PARAMS_PATH);
   if (paramsData === null) throw new SyncError(`brak pliku parametrów ${params.PARAMS_PATH}`);
-  let consumerParams;
-  try {
-    consumerParams = params.load(textOf(paramsData) ?? '\u0000');
-  } catch (error) {
-    if (error instanceof params.ParamsError) throw new SyncError(`plik parametrów niepoprawny: ${error.message}`);
-    throw error;
-  }
+  const consumerParams = loadConsumerParams(paramsData);
   const pin = consumerParams.standard;
   const manifest = await fetchManifest(deps.endpoints, STANDARD_REPO, pin.sha, deps.fetch);
   const findings = [];
@@ -631,7 +635,7 @@ async function main(argv, env = process.env, deps = {}) {
 module.exports = {
   STANDARD_REPO, MANIFEST_PATH, DEFAULT_ENDPOINTS, SyncError,
   sha256, dumpJson, textOf, blockOf, replaceBlock, parseManifest, manifestErrors, readPlainFile,
-  checkSelf, checkConsumer, makeHttpGet, resolveTag, assertPlainPath, writeAtomic, applyWrites, main,
+  checkSelf, checkConsumer, makeHttpGet, rawUrl, resolveTag, assertPlainPath, writeAtomic, applyWrites, main,
 };
 
 if (require.main === module) {
