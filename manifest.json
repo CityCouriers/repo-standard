@@ -6,7 +6,7 @@
       "path": ".github/standard/standard_sync.js",
       "kind": "exact",
       "critical": true,
-      "sha256": "2ab2c3f0818c440f500a54528489084e9db690d0979e4d17e9df9a555b8d271f"
+      "sha256": "a6d5d45bf455af45d0843f0adc5f7b891838ffd8156db363b701306aa791daa2"
     },
     {
       "path": ".github/standard/common/params.js",

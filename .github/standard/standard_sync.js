@@ -53,7 +53,7 @@ class SyncError extends Error {
 }
 
 const sha256 = (data) => crypto.createHash('sha256').update(data).digest('hex');
-const dumpJson = (value) => Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
+const dumpJson = (value) => Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
 const isObject = params.isObject;
 
 function textOf(data) {
@@ -183,7 +183,7 @@ function entryFinding(entry, data) {
   if (kind === 'block') {
     const block = blockOf(text, entry.block);
     if (block === null) return [`${entryPath}: brak znaczników bloku '${entry.block}' (po jednym begin i end)`];
-    return sha256(Buffer.from(block, 'utf8')) === entry.sha256 ? [] : [`${entryPath}: rozjazd bloku '${entry.block}'`];
+    return sha256(Buffer.from(block)) === entry.sha256 ? [] : [`${entryPath}: rozjazd bloku '${entry.block}'`];
   }
   return entry.markers.filter((marker) => !text.includes(marker)).map((marker) => `${entryPath}: brak znacznika '${marker}'`);
 }
@@ -279,8 +279,8 @@ function makeHttpGet({ ca, timeoutMs = 30000 } = {}) {
     }
     if (parsed.protocol !== 'https:') return reject(new SyncError(`tylko https: ${url}`));
     if (origin !== undefined && parsed.host !== origin) return reject(new SyncError(`przekierowanie poza ten sam host: ${url}`));
+    const fail = (error) => reject(error instanceof SyncError ? error : new SyncError(`pobranie ${url}: ${error.message}`));
     const request = https.request(parsed, {
-      method: 'GET',
       ca,
       headers: { 'User-Agent': 'repo-standard-sync', Accept: '*/*' },
       timeout: timeoutMs,
@@ -308,10 +308,10 @@ function makeHttpGet({ ca, timeoutMs = 30000 } = {}) {
         }
       });
       response.on('end', () => resolve(Buffer.concat(chunks)));
-      response.on('error', reject);
+      response.on('error', fail);
     });
     request.on('timeout', () => request.destroy(new SyncError(`przekroczono czas: ${url}`)));
-    request.on('error', (error) => reject(error instanceof SyncError ? error : new SyncError(`pobranie ${url}: ${error.message}`)));
+    request.on('error', fail);
     request.end();
   });
   return (url) => get(url, undefined, 0);
@@ -506,7 +506,7 @@ async function planApply(manifest, root, endpoints, repo, sha, fetch) {
     if (entry.kind === 'block') {
       const text = textOf(data);
       const block = text === null ? null : blockOf(text, entry.block);
-      if (block === null || sha256(Buffer.from(block, 'utf8')) !== entry.sha256) {
+      if (block === null || sha256(Buffer.from(block)) !== entry.sha256) {
         throw new SyncError(`${entry.path}: blok '${entry.block}' ze źródła nie zgadza się z manifestem`);
       }
       let content;
@@ -518,7 +518,7 @@ async function planApply(manifest, root, endpoints, repo, sha, fetch) {
         if (merged === null) throw new SyncError(`${entry.path}: istnieje bez znaczników bloku '${entry.block}'; dopisz znaczniki ręcznie i powtórz`);
         content = merged;
       }
-      writes.push({ path: entry.path, content: Buffer.from(content, 'utf8') });
+      writes.push({ path: entry.path, content: Buffer.from(content) });
       continue;
     }
     if (sha256(data) !== entry.sha256) throw new SyncError(`${entry.path}: pobrana treść nie zgadza się z sumą w manifeście`);
@@ -534,7 +534,7 @@ async function planApply(manifest, root, endpoints, repo, sha, fetch) {
 async function runApply(args, env, deps) {
   if (!args.version) throw new SyncError('apply wymaga --version vX.Y.Z');
   if (args.sha !== undefined && !params.FULL_SHA.test(args.sha)) throw new SyncError('--sha: oczekiwano pełnego SHA (40 znaków hex, małe litery)');
-  const root = fs.realpathSync(path.resolve(args.root));
+  const root = fs.realpathSync(path.resolve(args.root ?? process.cwd()));
   const repo = STANDARD_REPO;
   const sha = await resolveTag(deps.endpoints, repo, args.version, deps.fetch);
   if (args.sha !== undefined && args.sha !== sha) throw new SyncError(`tag ${args.version} wskazuje ${sha}, a podano --sha ${args.sha}`);
@@ -563,7 +563,7 @@ async function runApply(args, env, deps) {
 // ---------------------------------------------------------------- check
 
 async function runCheck(args, env, deps) {
-  const root = fs.realpathSync(path.resolve(args.root));
+  const root = fs.realpathSync(path.resolve(args.root ?? process.cwd()));
   if (args.self) {
     const manifestData = readPlainFile(root, MANIFEST_PATH);
     if (manifestData === null) throw new SyncError(`brak ${MANIFEST_PATH}`);
@@ -592,7 +592,7 @@ function report(title, lines, env) {
   for (const line of lines) console.log(`- ${line}`);
   if (env.GITHUB_STEP_SUMMARY) {
     try {
-      fs.appendFileSync(env.GITHUB_STEP_SUMMARY, `## ${title}\n\n${lines.map((line) => `- ${line}\n`).join('')}\n`, 'utf8');
+      fs.appendFileSync(env.GITHUB_STEP_SUMMARY, `## ${title}\n\n${lines.map((line) => `- ${line}\n`).join('')}\n`);
     } catch (error) {
       console.error(`::warning::nie zapisano podsumowania: ${error.message}`);
     }
@@ -604,7 +604,7 @@ function todayUtcMs(now) {
 }
 
 const OPTIONS = {
-  root: { type: 'string', default: '.' },
+  root: { type: 'string' },
   self: { type: 'boolean', default: false },
   version: { type: 'string' },
   sha: { type: 'string' },
