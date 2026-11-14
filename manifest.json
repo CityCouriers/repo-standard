@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "version": "v1.0.0",
+  "files": [
+    {
+      "path": ".github/standard/standard_sync.js",
+      "kind": "exact",
+      "critical": true,
+      "sha256": "a6d5d45bf455af45d0843f0adc5f7b891838ffd8156db363b701306aa791daa2"
+    },
+    {
+      "path": ".github/standard/common/params.js",
+      "kind": "exact",
+      "critical": true,
+      "sha256": "2918581f972d997e8aeeda5990e308b19ac6a6c56e094bd7c059ee0f40cbd81f"
+    },
+    {
+      "path": "scripts/ci/privacy-scan.sh",
+      "kind": "exact",
+      "critical": true,
+      "sha256": "9b941146761b605fabde9f7eec4c41ccfbba0f3cfa4c2d9c2464e1796df049ff"
+    },
+    {
+      "path": ".github/repo-standard.json",
+      "kind": "param"
+    }
+  ]
+}
