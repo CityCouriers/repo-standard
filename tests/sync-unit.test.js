@@ -539,3 +539,17 @@ test('applyWrites: rollback nie usuwa plików poza repozytorium po podmianie kat
   assert.throws(() => sync.applyWrites(root, [{ path: 'd/a.txt', content: Buffer.from('N') }, { path: 'z.txt', content: Buffer.from('N') }], hooks), (error) => error.message.includes('NIE przywrócono (napraw ręcznie, np. git checkout): d/a.txt (d/a.txt: ścieżka przechodzi przez dowiązanie symboliczne)'));
   assert.equal(fs.readFileSync(path.join(outside, 'a.txt'), 'utf8'), 'KEEP', 'plik poza repozytorium nietknięty');
 });
+
+test('applyWrites: po awarii sprzata (rmdir) wylacznie katalogi utworzone przez narzedzie, od najglebszego', (t) => {
+  const root = h.tmpDir();
+  t.after(() => h.rmDir(root));
+  const calls = [];
+  const original = fs.rmdirSync;
+  fs.rmdirSync = (target, ...rest) => { calls.push(target); return original(target, ...rest); };
+  try {
+    assert.throws(() => sync.applyWrites(root, [{ path: 'a/b/x.txt', content: Buffer.from('1') }], failOn('a/b/x.txt')), (error) => error.message === 'awaria zapisu a/b/x.txt (nic nie zmieniono): boom');
+  } finally {
+    fs.rmdirSync = original;
+  }
+  assert.deepEqual(calls, [path.join(root, 'a', 'b'), path.join(root, 'a')]);
+});

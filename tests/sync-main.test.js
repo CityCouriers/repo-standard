@@ -512,3 +512,27 @@ test('klient https: limit rozmiaru i czas oczekiwania', { skip: SKIP }, async (t
   await assert.rejects(server.fetch(`${server.base}/za-duzo`), (error) => error instanceof sync.SyncError && error.message === `odpowiedź za duża: ${server.base}/za-duzo`);
   await assert.rejects(server.fetch(`${server.base}/cisza`), (error) => error instanceof sync.SyncError && error.message === `przekroczono czas: ${server.base}/cisza`);
 });
+
+// Gniazda w stanie "uzywane" (nie wrocily do puli keep-alive) dla portu serwera testowego. Bez resume() odpowiedz
+// przekierowania albo bledu zostaje wstrzymana, a gniazdo zajete do czasu timeoutu klienta.
+const busySockets = (port) => Object.entries(https.globalAgent.sockets).filter(([key]) => key.includes(`:${port}:`)).reduce((count, [, list]) => count + list.length, 0);
+const settle = () => new Promise((resolve) => setTimeout(resolve, 300));
+
+test('klient https: po przekierowaniu pierwsze gniazdo wraca do puli', { skip: SKIP }, async (t) => {
+  const server = await serve(t, (req, res) => {
+    if (req.url === '/final') return res.end('koniec');
+    res.statusCode = 302;
+    res.setHeader('Location', '/final');
+    return res.end('tresc przekierowania');
+  }, { timeoutMs: 20000 });
+  assert.equal((await server.fetch(`${server.base}/x`)).toString('utf8'), 'koniec');
+  await settle();
+  assert.equal(busySockets(server.port), 0, 'gniazdo przekierowania nie zostalo zwolnione');
+});
+
+test('klient https: po statusie innym niz 200 gniazdo wraca do puli', { skip: SKIP }, async (t) => {
+  const server = await serve(t, (req, res) => { res.statusCode = 404; res.end('brak'); }, { timeoutMs: 20000 });
+  await assert.rejects(server.fetch(`${server.base}/x`), /status 404/);
+  await settle();
+  assert.equal(busySockets(server.port), 0, 'gniazdo po statusie 404 nie zostalo zwolnione');
+});
