@@ -28,7 +28,7 @@
       "path": ".github/standard/templates/template_contract.js",
       "kind": "exact",
       "critical": true,
-      "sha256": "01b66f6077c2e29b7a4785204e3829792d9f9aa79dec68be149b7c38e7c6f104"
+      "sha256": "72701b182b196565654f2981d51ad254a137369e33f37130c6da019b11c54cd8"
     },
     {
       "path": ".github/ISSUE_TEMPLATE/zadanie.md",
