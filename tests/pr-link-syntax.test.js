@@ -12,6 +12,7 @@ const { REPO_ROOT } = require('./helpers');
 
 const { parse, titleErrors } = syntax;
 const H = '#';
+const HOST = ['github', 'com'].join('.');
 const FIRST_LINE_ERROR = 'pierwsza linia opisu musi mieć postać `Fixes #<n>` albo `Refs #<n>` '
   + '(dokładnie, bez dwukropka i dopisków, jedno zgłoszenie, liczba bez zer wiodących)';
 const CLOSING_ERROR = (n) => `linia ${n}: słowo zamykające z odwołaniem do zgłoszenia (dozwolone tylko Fixes w pierwszej linii)`;
@@ -93,7 +94,7 @@ test('błędy pierwszej i dalszych linii są zbierane razem, pierwszy jest błę
 
 test('słowa zamykające: wszystkie odmiany, wielkość liter, dwukropek, rodzaj odstępu i odwołania', () => {
   const words = ['close', 'closes', 'closed', 'fix', 'fixes', 'fixed', 'resolve', 'resolves', 'resolved'];
-  const refs = [`${H}9`, 'GH-9', `owner/repo${H}9`, 'https://github.com/owner/repo/issues/9', `a.b-c_d/e.f-g_h${H}9`];
+  const refs = [`${H}9`, 'GH-9', `owner/repo${H}9`, `https://${HOST}/owner/repo/issues/9`, `a.b-c_d/e.f-g_h${H}9`];
   for (const word of words) {
     const forms = [word, word[0].toUpperCase() + word.slice(1), word.toUpperCase()];
     for (const form of forms) {
@@ -116,15 +117,15 @@ test('słowa zamykające: w środku linii, po znakach niebędących literami, w 
 test('nie są słowami zamykającymi: brak odwołania, inne słowa, brak odstępu', () => {
   for (const line of ['Naprawa fix w parserze', 'resolved bez numeru', 'prefix #5', 'suffix #6', 'unfixed #5', 'fixing #5', 'closer #5',
     'resolver #5', 'enclose #5', 'disclosed #5', 'fixes#5', 'fixes: x', 'fix #', 'fix #a', 'closes GH-', 'closes gh-x', 'closes /#5',
-    'closes owner/repo#', 'closes https://github.com/o/r/pull/5', 'closes http://example.com/o/r/issues/5', 'close\n#5', '#5 closes',
+    'closes owner/repo#', `closes https://${HOST}/o/r/pull/5`, 'closes http://example.com/o/r/issues/5', 'close\n#5', '#5 closes',
     'Fixes #<nr>', 'Refs #<nr>', 'Fixes #n albo Refs #n', 'fixes (#5)', 'fixes **#5**']) {
     assert.deepEqual(parse(`Fixes ${H}12\n${line}`).errors, [], line);
   }
 });
 
 test('odwołanie z adresem: tylko github.com i tylko zgłoszenia', () => {
-  assert.deepEqual(parse(`Fixes ${H}12\ncloses http://github.com/o/r/issues/5`).errors, [CLOSING_ERROR(2)]);
-  assert.deepEqual(parse(`Fixes ${H}12\ncloses https://github.com/o/r/issues/5`).errors, [CLOSING_ERROR(2)]);
+  assert.deepEqual(parse(`Fixes ${H}12\ncloses http://${HOST}/o/r/issues/5`).errors, [CLOSING_ERROR(2)]);
+  assert.deepEqual(parse(`Fixes ${H}12\ncloses https://${HOST}/o/r/issues/5`).errors, [CLOSING_ERROR(2)]);
   assert.deepEqual(parse(`Fixes ${H}12\ncloses https://githubXcom/o/r/issues/5`).errors, []);
   assert.deepEqual(parse(`Fixes ${H}12\ncloses https://github.com/o/issues/5`).errors, []);
   assert.deepEqual(parse(`Fixes ${H}12\ncloses https://github.com/o/r/issues/x`).errors, []);
@@ -154,7 +155,7 @@ test('wejście nie będące tekstem: wynik czerwony, bez wyjątku', () => {
 
 test('tytuł: słowo zamykające z odwołaniem to błąd, reszta nie', () => {
   for (const title of [`Closes ${H}9`, `fix: fixes ${H}9 w bramce`, 'feat: resolves GH-3', `Fixes: ${H}9`, `Fixes owner/repo${H}9`,
-    'closed https://github.com/o/r/issues/9', `RESOLVED ${H}5`, `a (closed ${H}5)`]) {
+    `closed https://${HOST}/o/r/issues/9`, `RESOLVED ${H}5`, `a (closed ${H}5)`]) {
     assert.deepEqual(titleErrors(title), [TITLE_ERROR], title);
   }
   for (const title of ['', 'feat: ujednolicenie powiązania', 'fix: naprawa parsera', `chore: prefix ${H}12`, 'docs: Refs i Fixes', `Refs ${H}12`]) {

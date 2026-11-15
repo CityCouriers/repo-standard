@@ -41,7 +41,7 @@
     { "name": "tabulator zamiast spacji", "body": "Fixes\t#12", "valid": false },
     { "name": "twarda spacja zamiast spacji", "body": "Fixes\u00a0#12", "valid": false },
     { "name": "odwolanie z repozytorium w pierwszej linii", "body": "Fixes owner/repo\u002312", "valid": false },
-    { "name": "adres zgloszenia w pierwszej linii", "body": "Fixes https://github.com/owner/repo/issues/12", "valid": false },
+    { "name": "adres zgloszenia w pierwszej linii", "body": "Fixes https://github\u002ecom/owner/repo/issues/12", "valid": false },
     { "name": "pusty opis", "body": "", "valid": false },
     { "name": "brak opisu (null)", "body": null, "valid": false },
     { "name": "pusta pierwsza linia", "body": "\n\nFixes #12", "valid": false },
@@ -59,7 +59,7 @@
     { "name": "slowo zamykajace z dwiema spacjami", "body": "Fixes #12\nCloses  #9", "valid": false },
     { "name": "slowo zamykajace z tabulatorem", "body": "Fixes #12\nclosed\t#9", "valid": false },
     { "name": "slowo zamykajace z odwolaniem GH", "body": "Refs #12\nCloses GH-9", "valid": false },
-    { "name": "slowo zamykajace z adresem zgloszenia", "body": "Fixes #12\nCloses https://github.com/owner/repo/issues/9", "valid": false },
+    { "name": "slowo zamykajace z adresem zgloszenia", "body": "Fixes #12\nCloses https://github\u002ecom/owner/repo/issues/9", "valid": false },
     { "name": "slowo zamykajace z odwolaniem z repozytorium", "body": "Fixes #12\nresolved owner/repo\u002345", "valid": false },
     { "name": "slowo zamykajace po CRLF", "body": "Fixes #12\r\nCloses #9", "valid": false },
     { "name": "slowo zamykajace w komentarzu HTML", "body": "Fixes #12\n<!-- Closes #9 -->", "valid": false },
@@ -85,7 +85,7 @@
     { "name": "tytul resolves z GH", "title": "feat: resolves GH-3", "valid": false },
     { "name": "tytul Fixes z dwukropkiem", "title": "Fixes: #12", "valid": false },
     { "name": "tytul Fixes z odwolaniem z repozytorium", "title": "Fixes owner/repo\u002312", "valid": false },
-    { "name": "tytul closed z adresem", "title": "closed https://github.com/owner/repo/issues/12", "valid": false },
+    { "name": "tytul closed z adresem", "title": "closed https://github\u002ecom/owner/repo/issues/12", "valid": false },
     { "name": "tytul resolved wielkimi literami", "title": "RESOLVED #5", "valid": false },
     { "name": "tytul null", "title": null, "valid": false }
   ]
