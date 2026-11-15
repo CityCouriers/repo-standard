@@ -23,6 +23,65 @@
     {
       "path": ".github/repo-standard.json",
       "kind": "param"
+    },
+    {
+      "path": ".github/standard/templates/template_contract.js",
+      "kind": "exact",
+      "critical": true,
+      "sha256": "01b66f6077c2e29b7a4785204e3829792d9f9aa79dec68be149b7c38e7c6f104"
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/zadanie.md",
+      "kind": "seed",
+      "markers": [
+        "## Triage",
+        "| priorytet |",
+        "| ryzyko |",
+        "| obszar |",
+        "**Refs:**",
+        "**Rola autora:**",
+        "**Rola recenzenta",
+        "Podpis:"
+      ],
+      "sha256": "460ef6c4ed95f40c3f9c1acf6c648e199046f086401e3ebd6478554d16c524a1"
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/blad.md",
+      "kind": "seed",
+      "markers": [
+        "## Triage",
+        "| priorytet |",
+        "| ryzyko |",
+        "| obszar |",
+        "**Refs:**",
+        "**Rola autora:**",
+        "**Rola recenzenta",
+        "Podpis:"
+      ],
+      "sha256": "645a016fe9af389f519b742e8e85587af703497e90d05e1ecc796a81b0c3b192"
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/epik.md",
+      "kind": "seed",
+      "markers": [
+        "## Triage",
+        "| priorytet |",
+        "| ryzyko |",
+        "| obszar |",
+        "**Refs:**",
+        "**Rola autora:**",
+        "**Rola recenzenta",
+        "Podpis:"
+      ],
+      "sha256": "64cb5884a872760ecf0b7efa301eee33aafaccc4d792e928107c86ff20cac082"
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/config.yml",
+      "kind": "seed",
+      "markers": [
+        "blank_issues_enabled: false"
+      ],
+      "sha256": "3e90a4f719ce7082873cd7009cb5dd792042e0b79a6b4860c8901f8d22eccbd3"
     }
   ]
 }
