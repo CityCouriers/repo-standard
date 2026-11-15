@@ -63,6 +63,8 @@
     { "name": "slowo zamykajace z odwolaniem z repozytorium", "body": "Fixes #12\nresolved owner/repo\u002345", "valid": false },
     { "name": "slowo zamykajace po CRLF", "body": "Fixes #12\r\nCloses #9", "valid": false },
     { "name": "slowo zamykajace w komentarzu HTML", "body": "Fixes #12\n<!-- Closes #9 -->", "valid": false },
+    { "name": "slowo zamykajace za koncem komentarza --!>", "body": "Fixes #12\n<!-- x --!> Closes #9", "valid": false },
+    { "name": "slowo zamykajace w komentarzu zamknietym --!>", "body": "Fixes #12\n<!-- Closes #9 --!>", "valid": false },
     { "name": "same powiazanie w komentarzu", "body": "<!-- Fixes #12 -->", "valid": false },
     { "name": "komentarz przed powiazaniem", "body": "<!-- instrukcja -->\nFixes #12", "valid": false },
     { "name": "komentarz za powiazaniem w tej samej linii", "body": "Fixes #12 <!-- ukryte -->", "valid": false },

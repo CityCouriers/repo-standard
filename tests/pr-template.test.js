@@ -9,6 +9,7 @@ const path = require('node:path');
 const sync = require('../.github/standard/standard_sync');
 const syntax = require('../.github/standard/pr-link/pr_link_syntax');
 const h = require('./helpers');
+const { commentError } = require('./html-comments');
 
 const TEMPLATE_PATH = '.github/PULL_REQUEST_TEMPLATE.md';
 const MARKERS = ['Fixes #<nr>', '## Dowody', '## Mutacje', '## Ryzyko i wycofanie', 'Podpis:'];
@@ -94,12 +95,7 @@ test('szablon nie ma słowa zamykającego z numerem ani placeholderów w formie 
 });
 
 test('komentarze HTML są zbalansowane i nie zagnieżdżone', () => {
-  let open = false;
-  for (const token of template.match(/<!--|-->/g)) {
-    assert.notEqual(token === '<!--', open, 'zagnieżdżony albo niezamknięty komentarz');
-    open = token === '<!--';
-  }
-  assert.equal(open, false);
+  assert.equal(commentError(template), null);
   assert.ok(count(template, '<!--') >= 3);
 });
 

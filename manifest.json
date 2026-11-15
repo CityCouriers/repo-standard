@@ -30,7 +30,7 @@
       "path": ".github/standard/pr-link/cases.json",
       "kind": "exact",
       "critical": true,
-      "sha256": "450bb224d1177514ca8cc60094325f3d3f3987a4200211a68961e5bba6418d7b"
+      "sha256": "ec63261b13de513e6ae7d9781de07440256ff2834bac2ff264b97091ebcd1ac3"
     },
     {
       "path": ".github/PULL_REQUEST_TEMPLATE.md",
