@@ -21,6 +21,30 @@
       "sha256": "9b941146761b605fabde9f7eec4c41ccfbba0f3cfa4c2d9c2464e1796df049ff"
     },
     {
+      "path": ".github/standard/pr-link/pr_link_syntax.js",
+      "kind": "exact",
+      "critical": true,
+      "sha256": "f5844d431fc785720d675c6e60a78a220351c545d8f2338600d285af96b255bf"
+    },
+    {
+      "path": ".github/standard/pr-link/cases.json",
+      "kind": "exact",
+      "critical": true,
+      "sha256": "598fe2fc872f5da82417bdf1b9eb03d7a6ae76c3ebc2e01d9cf7dddb8d7a35e8"
+    },
+    {
+      "path": ".github/PULL_REQUEST_TEMPLATE.md",
+      "kind": "seed",
+      "markers": [
+        "Fixes #<nr>",
+        "## Dowody",
+        "## Mutacje",
+        "## Ryzyko i wycofanie",
+        "Podpis:"
+      ],
+      "sha256": "cdbfd1c4d0c1234632322403934f8eecabb2d11018d753cbf9ff70ac50e525f1"
+    },
+    {
       "path": ".github/repo-standard.json",
       "kind": "param"
     }
