@@ -1,13 +1,13 @@
 # repo-standard
 
-> **Status: szkielet dokumentacji (brak kodu).** Ten commit opisuje docelowy kontrakt: elementy, plik parametrów, manifest, zasady zaufania i adopcji. Nic tu jeszcze nie działa: kod skryptów, testy i `manifest.json` powstają w kolejnych wydaniach, a do pierwszego wydania (`v1.0.0`) niczego stąd nie wolno kopiować do produkcyjnych repozytoriów.
+> **Status: wersja wstępna, przed wydaniem `v1.0.0`.** Działa synchronizator `standard_sync.js` (`check`, `check --self`, `apply`), walidator pliku parametrów, manifest i CI tego repozytorium (testy, skan prywatności, skan sekretów). Pozostałe elementy z tabeli poniżej (bramka audytu, `review-gate`, `standard-drift` i inne) powstają w kolejnych zgłoszeniach. Do wydania `v1.0.0` niczego stąd nie wolno kopiować do produkcyjnych repozytoriów.
 
 Docelowo: wspólne przepływy GitHub Actions, skrypty bramek i szablony dla repozytoriów CityCouriers. Każdy element ma mieć jedną wersję wzorcową, a repozytorium, które go używa, kopiuje ją bez zmian i trzyma jeden mały plik parametrów. Rozjazd kopii od wzorca ma wykrywać automat.
 
 ## Zasada działania (docelowa)
 
 1. Wzorzec jest wydawany z tagiem (`v1.0.0`, `v1.1.0`, ...). Wydanie zawiera `manifest.json`: ścieżkę, rodzaj i sumę SHA-256 każdego pliku.
-2. Repozytorium-konsument kopiuje pliki wydania skryptem `standard_sync.py apply`. Skrypt pobiera manifest i pliki z tego publicznego repozytorium po pełnym SHA commita wydania, bez tokenu, i zapisuje wersję oraz SHA w pliku parametrów konsumenta.
+2. Repozytorium-konsument kopiuje pliki wydania skryptem `standard_sync.js apply`. Skrypt pobiera manifest i pliki z tego publicznego repozytorium po pełnym SHA commita wydania, bez tokenu, i zapisuje wersję oraz SHA w pliku parametrów konsumenta.
 3. Workflow `standard-drift.yml` (też kopiowany) biegnie w soboty, przy PR zmieniającym `.github/**` i ręcznie. Porównuje pliki z manifestem wersji z pliku parametrów, sprawdza wygasłe odstępstwa i czy jest nowsze wydanie. Przy PR i przy uruchomieniu ręcznym jest czerwony przy rozjeździe; w sobotę zakłada albo aktualizuje jedno zgłoszenie „Rozjazd wzorca” z etykietami poza zakresem bramki audytu (`P3`, `T1`, `area:process`).
 4. Aktualizacja to zwykły PR w repozytorium-konsumencie, z jego własnym audytem i CI. Kontrola nie zapisuje do plików repozytorium: token `GITHUB_TOKEN` nie ma uprawnienia do zmiany plików w `.github/workflows` ([lista uprawnień](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions)), więc automatyczna synchronizacja wymagałaby dodatkowego sekretu, którego świadomie nie wprowadzamy.
 
@@ -15,7 +15,7 @@ Przepływy wielokrotnego użytku (`workflow_call`) i, o ile plan organizacji poz
 
 ## Elementy wzorca (zakres `v1.0.0`)
 
-Wersja wzorcowa każdego elementu została wybrana według zachowania, nie według języka. Skrypty są w Pythonie (biblioteka standardowa, bez zależności), wersja interpretera jest zapisana w workflow.
+Wersja wzorcowa każdego elementu została wybrana według zachowania, nie według języka. Skrypty są w Node.js (CommonJS, wyłącznie biblioteka standardowa, bez zależności i bez `npm install`), wersja środowiska (Node 22) jest zapisana w workflow.
 
 | element | co robi | parametr lokalny |
 | --- | --- | --- |
@@ -30,7 +30,7 @@ Wersja wzorcowa każdego elementu została wybrana według zachowania, nie wedł
 | polityka workflow | wszystkie `uses:` spoza repozytorium na pełnym SHA z komentarzem wersji, `permissions: {}` na poziomie workflow, literalny runner GitHub-hosted dla wyzwalaczy PR | brak |
 | Dependabot | blok `github-actions`: `weekly`, sobota, grupowanie, etykieta `dependencies` | inne ekosystemy dopisuje konsument |
 | release-drafter | autolabeler pomija Draft i forki | lokalny `release-drafter.yml` (kategorie) |
-| kontrola rozjazdu | `standard_sync.py`, `standard-drift.yml` | `standard`, `overrides` |
+| kontrola rozjazdu | `standard_sync.js`, `standard-drift.yml` | `standard`, `overrides` |
 
 Elementy zależne od repozytorium (treść szablonów, sekcje dowodów w PR, łańcuch narzędzi jakości, budowa wydań, workflow lokalne) zostają w konsumencie. Standard dostarcza tylko szkielet i test spójności: `config.yml` szablonów zgłoszeń, stopkę podpisu, pierwszą linię `Fixes`/`Refs` w szablonie PR oraz test zgodności jobu `quality-gate` z parametrami.
 
@@ -45,7 +45,7 @@ Jedyny plik konsumenta, którego standard nigdy nie nadpisuje.
   "audit": { "active_since": "RRRR-MM-DDTGG:MM:SSZ" },
   "triage": { "active_since": "RRRR-MM-DDTGG:MM:SSZ" },
   "quality_gate": { "workflow": "quality.yml", "jobs": ["..."], "required": { "pull_request": ["..."], "push": ["..."], "workflow_dispatch": ["..."] } },
-  "review_gate": { "protected_paths": ["pyproject.toml"] },
+  "review_gate": { "protected_paths": ["config/protected.json"] },
   "overrides": [ { "path": ".github/workflows/x.yml", "reason": "...", "until": "RRRR-MM-DD", "issue": "owner/repo#nr" } ]
 }
 ```
@@ -63,6 +63,42 @@ Daty aktywacji leżą w pliku, w historii repozytorium, a nie w zmiennej repozyt
 
 Pliki z flagą `critical` (skrypty i workflow bramek, kontroli rozjazdu, polityki, schemat parametrów) są zawsze `exact` i nie mogą mieć odstępstwa. Odstępstwo w `overrides` dotyczy wyłącznie plików z `overridable: true` i wymaga otwartego zgłoszenia z `audit:ok`, terminu najwyżej 90 dni i powodu. Zmiana `overrides` jest zmianą plików bramek.
 
+`manifest.json` nie ma własnego wpisu z sumą (samo-hashowanie jest niewykonalne): jego integralność wynika z przypiętego commita wydania, a `check --self` pilnuje jego schematu i kompletności wpisów. Wpis może mieć `source` (plik źródłowy szablonu, gdy różni się od ścieżki docelowej); manifest nie zawiera pól spoza schematu, w szczególności nie deklaruje własnego SHA commita.
+
+## Skrypt `standard_sync.js`
+
+Node.js (CommonJS, biblioteka standardowa, bez zależności), minimum Node 22. Pliki: `.github/standard/standard_sync.js` i `.github/standard/common/params.js` (walidator pliku parametrów). Skrypt jest plikiem `critical`: kopiowany bez zmian.
+
+```bash
+node .github/standard/standard_sync.js check [--root .]
+node .github/standard/standard_sync.js check --self [--root .]
+node .github/standard/standard_sync.js apply --version v1.0.0 [--sha <pełny SHA>] [--root .] [--dry-run]
+```
+
+- `check` porównuje pliki konsumenta z manifestem wersji zapisanej w `.github/repo-standard.json` (manifest jest pobierany po przypiętym pełnym SHA).
+- `check --self` działa w repozytorium wzorca: porównuje `manifest.json` z własnymi plikami, pilnuje schematu i kompletności wpisów (plik objęty katalogami wzorca, a niewpisany do manifestu, to rozjazd) oraz sprawdza `overrides` z lokalnego pliku parametrów, jeśli istnieje.
+- `apply --version` zamienia tag na pełny SHA commita, pobiera manifest i WSZYSTKIE pliki po tym SHA (tylko https, bez tokenu, przekierowania wyłącznie na ten sam host i https; nie ma wyjątku dla http), sprawdza w pamięci sumy SHA-256, ścieżki, schemat manifestu i zgodność wersji manifestu z tagiem. Dopiero po pełnej weryfikacji zapisuje pliki i na końcu `.github/repo-standard.json`. Błąd na dowolnym etapie pobierania lub weryfikacji oznacza zero zmian w repozytorium, także w pliku parametrów. Z `--sha` obok `--version` SHA tagu musi być równy podanemu.
+- Kody wyjścia: 0 zgodne, 1 rozjazd, 2 błąd działania (sieć, zły manifest, zły plik parametrów, odmowa zapisu). Fail-closed.
+
+Bezpieczeństwo zapisów (wszystkie zapisy, także `.github/repo-standard.json`): odmowa ścieżek spoza katalogu repozytorium (`..`), ścieżek w `.git` oraz dowiązań symbolicznych w pliku docelowym i w dowolnym katalogu nadrzędnym. Zapis idzie przez plik tymczasowy w tym samym katalogu (otwarty z wykluczeniem istniejącego pliku, a na platformach, które to wspierają, także dowiązania) i `rename`, po ponownej kontroli ścieżki bezpośrednio przed zapisem. Zostaje wąskie okno wyścigu między ostatnią kontrolą a `rename`, którego bez wsparcia systemu plików nie da się zamknąć; dlatego skrypt jest przeznaczony do repozytorium, w którym nikt inny nie zmienia struktury katalogów w trakcie działania.
+
+Awaria w trakcie wielu zapisów: przed zapisem skrypt zapamiętuje poprzednią treść każdego pliku i przy błędzie przywraca je w odwrotnej kolejności. Wynik jest jawny: komunikat „częściowa awaria zapisu” z listą plików zapisanych, przywróconych i nieprzywróconych (kod 2). Gdy przywrócenie samo zawiedzie, lista wskazuje pliki do ręcznej naprawy z `git checkout`.
+
+Odstępstwa (`overrides`): B1 sprawdza wyłącznie składnię (plik z manifestu z `overridable: true`, nigdy `critical`; zgłoszenie w postaci `wlasciciel/repo#nr`; termin najwyżej 90 dni; powód). Stanu zgłoszenia (otwarte, `audit:ok`) B1 NIE sprawdza: wynik brzmi „składnia poprawna, stan zgłoszenia niezweryfikowany”, a odstępstwo nie jest uznawane za zatwierdzone, więc nie wyłącza kontroli pliku i `apply` go nie pomija. Uznanie odstępstwa wprowadzi dopiero zaufana bramka w kolejnym zgłoszeniu.
+
+### Testy
+
+```bash
+node --test "tests/*.test.js"
+node .github/standard/standard_sync.js check --self
+```
+
+Testy używają wyłącznie danych syntetycznych i lokalnego serwera https z certyfikatem wygenerowanym na czas testu (potrzebny `openssl`; bez niego testy sieciowe są pomijane z jawnym komunikatem). Test dokumentacji pilnuje, żeby README, `THIRD_PARTY.md` i `.github/` nie odsyłały do innej implementacji synchronizatora niż Node.js. Test polityki workflow sprawdza przypięcie akcji do pełnego SHA, `permissions: {}` na poziomie workflow i literalny runner GitHub-hosted.
+
+### CI tego repozytorium
+
+`.github/workflows/ci.yml`: `tests` (Node 22: testy i `check --self`), `privacy` (`scripts/ci/privacy-scan.sh`: ścieżki lokalne, katalogi domowe, adresy e-mail, identyfikatory zgłoszeń w prywatnych repozytoriach; z lokalnym plikiem wzorców spoza repozytorium, wskazanym zmienną `PRIVACY_PATTERNS_FILE`, także zadane nazwy; wzorce nie trafiają do Git ani do logów) i `secret-scan` (gitleaks z przypiętą sumą SHA-256 i kontrolą ujemną na sztucznym tokenie). Skan prywatności z lokalnym plikiem wzorców jest bramką przed wydaniem; w CI biegnie bez niego.
+
 ## Zaufanie do kodu bramek
 
 - `review-gate` i `standard-drift` biegną na `pull_request_target` z kodem z domyślnej gałęzi. HEAD PR jest wyłącznie danymi, nigdy nie jest wykonywany.
@@ -76,7 +112,7 @@ Każdy workflow wyzwalany przez `pull_request` albo `pull_request_target` ma `ru
 
 ## Adopcja (po wydaniu `v1.0.0`)
 
-1. Skopiuj wydanie: `python standard_sync.py apply --version v1.0.0`.
+1. Skopiuj wydanie: raz pobierz ręcznie `.github/standard/standard_sync.js` i `.github/standard/common/params.js` z wydania po pełnym SHA commita (sprawdź sumy z `manifest.json`), a potem uruchom `node .github/standard/standard_sync.js apply --version v1.0.0`; skrypt zastąpi te pliki zweryfikowanymi.
 2. Uzupełnij `.github/repo-standard.json` (daty aktywacji, listy jobów strażnika, dodatkowe ścieżki bramki przeglądu).
 3. Dopisz do ochrony domyślnej gałęzi wymagane kontrole `quality-gate`, `review-gate` i `secret-scan`.
 4. Włącz `standard-drift.yml` i sprawdź, że kontrola jest zielona na czystej kopii.
@@ -84,6 +120,6 @@ Każdy workflow wyzwalany przez `pull_request` albo `pull_request_target` ma `ru
 
 ## Zasady tego repozytorium
 
-- Repozytorium jest publiczne. Nie ma w nim danych klientów ani kandydatów, nazw klientów, danych osobowych, kluczy, domen wewnętrznych, identyfikatorów instalacji ani odnośników do prywatnych zasobów. Testy, gdy powstaną, używają wyłącznie danych syntetycznych.
+- Repozytorium jest publiczne. Nie ma w nim danych klientów ani kandydatów, nazw klientów, danych osobowych, kluczy, domen wewnętrznych, identyfikatorów instalacji ani odnośników do prywatnych zasobów. Testy używają wyłącznie danych syntetycznych.
 - Od ustawienia ochrony domyślnej gałęzi każda zmiana idzie przez PR z audytem strony przeciwnej; zmiana plików bramek wymaga jawnej akceptacji w werdykcie.
 - Licencja: [MIT](LICENSE). Narzędzia pobierane w trakcie pracy (gitleaks, actionlint, release-drafter) nie wchodzą do repozytorium: [THIRD_PARTY.md](THIRD_PARTY.md).

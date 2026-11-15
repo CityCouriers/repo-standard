@@ -1,0 +1,115 @@
+name: CI
+
+# Testy, skan prywatności i skan sekretów repozytorium wzorca. Biegnie z gałęzi PR (zwykły `pull_request`), więc
+# nie jest dowodem zaufania do kodu bramek: tę rolę pełni osobna bramka przeglądu z domyślnej gałęzi.
+# Job `secret-scan` i `scripts/ci/privacy-scan.sh` pochodzą z publicznego repozytorium pc (commit 2538247b1).
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  tests:
+    name: tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Testy
+        run: node --test "tests/*.test.js"
+
+      - name: Manifest zgodny z plikami wzorca
+        run: node .github/standard/standard_sync.js check --self
+
+  privacy:
+    name: privacy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Skan plików
+        run: bash scripts/ci/privacy-scan.sh
+
+      - name: Skan komunikatów i metadanych commitów PR
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/ci/privacy-scan.sh --log "${BASE_SHA}..${HEAD_SHA}"
+
+  secret-scan:
+    name: secret-scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # gitleaks-action w organizacji wymaga licencji (GITLEAKS_LICENSE); sam skaner jej nie wymaga.
+      # Wersja i SHA-256 zgodne z gitleaks_8.30.1_checksums.txt wydania.
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+          GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        run: |
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/$archive"
+          echo "$GITLEAKS_SHA256  $RUNNER_TEMP/$archive" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
+
+      - name: Gitleaks
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Bez --first-parent i --no-merges, bo pomijają commity boczne i zmiany w samym merge'u.
+          # --diff-merges=first-parent pokazuje merge wobec pierwszego rodzica, także rozwiązanie konfliktu.
+          scope=--all
+          if [ "$EVENT_NAME" = pull_request ]; then
+            scope="${BASE_SHA}..${HEAD_SHA}"
+          fi
+          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --log-opts="--diff-merges=first-parent $scope" .
+
+      - name: Kontrola ujemna, skaner musi wykryć sztuczny token
+        run: |
+          set -u
+          scan_dir="$(mktemp -d)"
+          printf 'token = "github_pat_%s"\n' "$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 82)" > "$scan_dir/fake.env"
+          if "$RUNNER_TEMP/gitleaks" dir "$scan_dir" --redact --no-banner; then
+            echo "BŁĄD: gitleaks przepuścił sztuczny token. Skaner nie działa."
+            exit 1
+          fi
+          echo "OK: gitleaks zatrzymał sztuczny token."
