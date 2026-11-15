@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "standard": { "version": "v0.0.0", "sha": "0000000000000000000000000000000000000000" },
+  "audit": { "active_since": "2026-11-15T00:00:00Z" },
+  "triage": { "active_since": "2026-11-15T00:00:00Z" },
+  "quality_gate": {
+    "workflow": "ci.yml",
+    "jobs": ["tests", "privacy", "secret-scan"],
+    "required": {
+      "pull_request": ["tests", "privacy", "secret-scan"],
+      "push": ["tests", "privacy", "secret-scan"],
+      "workflow_dispatch": ["tests", "privacy", "secret-scan"]
+    }
+  },
+  "review_gate": { "protected_paths": [] },
+  "overrides": []
+}
