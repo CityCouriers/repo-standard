@@ -21,7 +21,8 @@ Wersja wzorcowa każdego elementu została wybrana według zachowania, nie wedł
 | --- | --- | --- |
 | bramka audytu zgłoszeń `audit:*` | stan audytu zgłoszeń w zakresie (priorytet P0-P2 albo ryzyko T2/T3): wyłącznie strona przeciwna autorowi wydaje ważny werdykt `/audit-ok` albo `/audit-changes`; autor jest ustalany z trzech zgodnych sygnałów (podpis, etykieta `by:agent`, aplikacja, przez którą powstała treść); edycja treści albo komendy unieważnia werdykt | `audit.active_since` |
 | triage | uzupełnia brakujące P, T i area z tabeli „Triage” w treści zgłoszenia, nakłada i zdejmuje `needs-triage`; wymagane rodziny są stałe: P, T, area | `triage.active_since` |
-| powiązanie PR ze zgłoszeniem | pierwsza linia opisu PR to `Fixes #n` albo `Refs #n`; zgłoszenie musi istnieć i być otwarte; ukryte słowa zamykające są błędem; PR Dependabota jest wyjątkiem | brak |
+| szablon PR i składnia powiązania | szablon `.github/PULL_REQUEST_TEMPLATE.md` (rodzaj `seed`) i wzorcowy parser pierwszej linii opisu: dokładnie `Fixes #n` (ostatni PR zgłoszenia, zamyka je przy scaleniu) albo `Refs #n` (PR częściowy), jedna składnia we wszystkich repozytoriach; szczegóły w sekcji „Szablon PR i powiązanie PR ze zgłoszeniem” | brak |
+| kontrola powiązania PR ze zgłoszeniem (osobny element) | zgłoszenie musi istnieć, nie być PR i być otwarte; słowa zamykające w tytule PR są błędem; PR Dependabota jest wyjątkiem; używa wzorcowego parsera | brak |
 | strażnik wersji roboczej | job zbiorczy: PR w Draft jest zawsze czerwony; poza Draft wymagane joby muszą mieć `success`, pozostałe `skipped`; brak wyniku albo wynik nieznany jest czerwony | `quality_gate.jobs`, `quality_gate.required` |
 | bramka przeglądu `review-gate` | zielona, gdy ostatni ważny werdykt strony przeciwnej wskazuje pełny SHA HEAD, powiązane zgłoszenia mają `audit:ok`, a zmiana plików bramek ma linię „Zmiana bramki: zaakceptowana”; kod z domyślnej gałęzi | `review_gate.protected_paths` |
 | etykiety | manifest standardu (`labels.standard.json`) scalany z lokalnym `labels.json`; synchronizacja zapisuje tylko z domyślnej gałęzi i weryfikuje stan po zmianie; etykieta spoza obu plików łamie zgodność | lokalny `labels.json` |
@@ -33,6 +34,55 @@ Wersja wzorcowa każdego elementu została wybrana według zachowania, nie wedł
 | kontrola rozjazdu | `standard_sync.js`, `standard-drift.yml` | `standard`, `overrides` |
 
 Elementy zależne od repozytorium (treść szablonów, sekcje dowodów w PR, łańcuch narzędzi jakości, budowa wydań, workflow lokalne) zostają w konsumencie. Standard dostarcza tylko szkielet i test spójności: `config.yml` szablonów zgłoszeń, stopkę podpisu, pierwszą linię `Fixes`/`Refs` w szablonie PR oraz test zgodności jobu `quality-gate` z parametrami.
+
+## Szablon PR i powiązanie PR ze zgłoszeniem
+
+Trzy odrębne umowy, które nie są zlewane w jedną:
+
+1. **Sekcje szablonu** (markery w `manifest.json`).
+2. **Składnia powiązania PR ze zgłoszeniem** (jedna dla wszystkich repozytoriów; parser, wspólne przypadki testowe).
+3. **Podpis strony i powiązanie werdyktu z HEAD** (element „bramka przeglądu `review-gate`”): szablon dostarcza tylko miejsce na podpis; nie ustala, kto jest autorem i czy werdykt dotyczy bieżącego HEAD.
+
+### Szablon `.github/PULL_REQUEST_TEMPLATE.md`
+
+Rodzaj `seed`: kopiowany raz, potem `check` sprawdza wyłącznie markery. Markery (zapisane w `manifest.json`, każdy musi występować w pliku): `Fixes #<nr>` (pierwsza linia), `## Dowody`, `## Mutacje`, `## Ryzyko i wycofanie`, `Podpis:` (linia podpisu strony). Pozostałe sekcje są zalecane i nie są markerami; konsument może je zmienić albo usunąć: `## Co zmienia i po co`, `## Realizacja Kryteriów Akceptacji (AC)`, `## Czego nie sprawdzono`, `## Pochodzenie i zmiany względem źródła`, `## Przed Ready for review`.
+
+- Wzorzec: pierwsza linia i nagłówki kontraktowe z markerów; konwencje: pole niedotyczące to `N/A (powód)`, komentarze HTML to instrukcja, placeholdery stoją w nawiasach `<...>`.
+- Parametr (lokalnie w konsumencie, markerów nie zmienia): pozycje dowodów zależne od stosu, wiersz mutacji (narzędzie i format), nazwy lokalnych kontroli w „Przed Ready”, sekcje stosowe (przeglądarka, runtime, macierz testów), konwencja tytułu, gdy konsument ma kontrolę tytułu.
+- Sekcję lokalną dopisuje się pod markerami (albo w ich treści); nie zmienia się i nie usuwa linii z markerem. Zmiana nazwy markera to zmiana kontraktu: wpis w `manifest.json`, test w tym repozytorium i kontrola konsumenta w jednym wydaniu.
+- `Mutacje`: nagłówek jest kontraktem z kontrolą mutacji (kończy się na następnym nagłówku `#`/`##`); format wiersza (narzędzie, pola) jest lokalny. Dokumenty i konfiguracja: test zachowania na kopii zamiast narzędzia mutacyjnego.
+- Domyślna pierwsza linia to `Fixes #<nr>`: placeholder nie jest poprawnym numerem, więc niewypełniony szablon jest czerwony dla parsera.
+
+### Składnia powiązania (jedna we wszystkich repozytoriach)
+
+Decyzja właściciela z 2026-11-15: jedna składnia powiązania; `Fixes` zamyka zgłoszenie przy scaleniu, `Refs` dla PR-a częściowego. Parser: `.github/standard/pr-link/pr_link_syntax.js`, funkcja `parse(body)`; wspólne przypadki testowe: `.github/standard/pr-link/cases.json`.
+
+- **Miejsce:** pierwsza linia opisu PR. Znak BOM na początku jest ignorowany; końce linii LF i CRLF są równoważne. Pusta pierwsza linia, komentarz, odstęp albo cokolwiek przed słowem to błąd.
+- **Forma:** dokładnie `Fixes #<n>` albo `Refs #<n>`, gdzie `<n>` to liczba dodatnia bez zer wiodących, najwyżej 9 cyfr, zgłoszenie z tego repozytorium. Cała linia, bez dopisków, pogrubień, kropki i przecinka; dopuszczalne są wyłącznie spacje lub tabulatory na końcu linii.
+- **Wielkość liter:** dokładnie `Fixes` i `Refs`; inne warianty (`fixes`, `FIXES`, `Fix`, `Closes`, `Resolves`, `Ref`) są błędem.
+- **Dwukropek:** błąd (`Fixes: #n`, `Refs: #n`). Dwukropek nie ma znaczenia dla GitHuba, dlatego nie jest dopuszczony: parsery nie mają dwóch dialektów.
+- **Jedno zgłoszenie na PR:** `Fixes #a, #b`, `Fixes #a #b` i druga linia powiązania (`Fixes` albo `Refs` jako początek dalszej linii) to błędy.
+- **Słowa zamykające poza pierwszą linią:** błąd wszędzie indziej w treści: każde słowo zamykające GitHuba (`close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves`, `resolved`, wielkość liter bez znaczenia, z dwukropkiem lub bez) z odwołaniem do zgłoszenia (`#n`, `GH-n`, `właściciel/repo#n` albo adres zgłoszenia). Komentarze HTML niczego nie ukrywają i nie są wycinane przed oceną: parser skanuje całą treść, także komentarze (w tym zamknięte `--!>`), więc słowo zamykające z odwołaniem w komentarzu jest błędem tak samo jak poza nim. Uzasadnienie: traktowanie komentarzy przez GitHub nie jest tu zweryfikowane, a zły kierunek błędu zamykałby zgłoszenie. Konsekwencje: `Fixes #n` ukryte w komentarzu nie jest ignorowane (jest błędem), a pierwsza linia będąca komentarzem jest błędem (patrz Miejsce). Linia zaczynająca się od `Refs` jest drugim powiązaniem, ale `Refs` w środku linii (np. wewnątrz komentarza) nie jest powiązaniem i niczego nie zamyka.
+- **`Fixes` albo `Refs` jest wymagane:** brak obu (także placeholder `<nr>`) to błąd.
+- **Wynik:** `parse(body)` zwraca `{ kind, issue, errors }`. `kind` (`Fixes` albo `Refs`) i `issue` są ustawione, gdy pierwsza linia jest poprawna, a `errors` jest wtedy puste albo opisuje naruszenia w dalszej części. Kontrola PR traktuje niepuste `errors` jako czerwone, niezależnie od `kind`.
+- **Tytuł PR:** słowa zamykające z odwołaniem w tytule to błąd, ale parser opisu ich nie sprawdza (nie dostaje tytułu). Sprawdza je kontrola PR funkcją `titleErrors(title)` z tego samego modułu, wywołaną obok `parse(body)`.
+- **Poza parserem:** stan zgłoszenia (istnieje, nie jest PR, jest otwarte) sprawdza kontrola PR przez API; komunikaty commitów i komunikat squasha nie są objęte tą umową, więc szablon i parser nie obiecują, że żaden scalony PR nie zamknie zgłoszenia inaczej niż przez pierwszą linię.
+
+Dotychczasowe kontrole w repozytoriach organizacji różniły się: pierwsza linia albo dowolne miejsce w opisie, dwukropek wymagany, zabroniony albo opcjonalny, `Fixes` dozwolone albo zabronione, dodatkowe słowa (`Closes`, `Resolves`, `Ref`). Ta umowa je ujednolica; każda kontrola konsumenta jest zmieniana razem z kolejnym wydaniem wzorca, z własnym PR, audytem i mutacjami zmienionych plików. Do czasu wydania nic w konsumentach od tej umowy nie zależy.
+
+Wspólne przypadki (`cases.json`) przechodzi parser w tym repozytorium; kontrola PR w konsumencie ma przejść te same przypadki (część „body”: wynik `parse`, część „title”: wynik `titleErrors`).
+
+### Kolejność wdrożeń
+
+Szablon i parser wchodzą w wydaniu przed kontrolą PR w konsumencie; kontrole wszystkich konsumentów zmieniane są w jednej fali wydania. Kto wchodzi drugi (kontrola PR albo bramka przeglądu), dopisuje test krzyżowy zgodności z markerami i z przypadkami.
+
+### Testy tego elementu
+
+```bash
+node --test "tests/pr-template.test.js" "tests/pr-link-syntax.test.js"
+```
+
+`tests/pr-template.test.js` pilnuje zgodności szablonu z manifestem (każdy marker w pliku, każdy nagłówek kontraktowy ma marker), formy niewypełnionego szablonu (czerwony dla parsera, bez słowa zamykającego z numerem, bez placeholderów w formie `#nr`, zbalansowane komentarze), a także kontroli zerowej i ujemnej: szablon bez zmian jest zgodny z `check --self`, a kopia bez któregokolwiek markera jest odrzucona. Test zgodności podpisów szablonu ze stronami z bramki audytu jest oznaczony jako oczekujący (`todo`) do scalenia bramki audytu i wtedy staje się zwykłym testem.
 
 ## Plik parametrów `.github/repo-standard.json`
 
