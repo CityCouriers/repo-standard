@@ -191,12 +191,22 @@ test('wydajność: długie wejścia kończą się szybko (bez katastrofalnego na
 });
 
 test('komentarze HTML niczego nie ukrywają: ocena obejmuje ich treść, nie jest ich wycinaniem', () => {
-  const stripped = (body) => body.replace(/<!--[\s\S]*?(?:-->|--!>)/g, '');
+  const strippedOnce = (body) => body.replace(/<!--[\s\S]*?(?:-->|--!>)/g, '');
+  // Do stanu stałego: jedno przejście może zostawić nowy komentarz złożony z resztek (np. <!-<!-- x -->- y -->).
+  const stripped = (body) => {
+    let current = body;
+    for (let next = strippedOnce(current); next !== current; next = strippedOnce(current)) current = next;
+    return current;
+  };
   for (const body of ['Fixes #12\n<!-- Closes #9 -->', 'Refs #12\n<!-- Fixes #13 -->', 'Fixes #12\n<!--\nukryte\nCloses #9\n-->',
     'Fixes #12\n<!-- Closes #9 --!>']) {
     assert.notDeepEqual(parse(body).errors, [], body);
     assert.deepEqual(parse(stripped(body)).errors, [], `po wycięciu komentarzy byłoby zielone: ${body}`);
   }
+  const nested = 'Fixes #12\n<!-<!-- x -->- Closes #9 -->';
+  assert.notDeepEqual(parse(nested).errors, []);
+  assert.notDeepEqual(parse(strippedOnce(nested)).errors, [], 'jedno przejście zostawia komentarz z resztek');
+  assert.deepEqual(parse(stripped(nested)).errors, []);
   assert.notEqual(parse('<!-- Fixes #12 -->\nFixes #12').errors.length, 0);
   assert.deepEqual(parse('Fixes #12\n<!-- Refs #13 -->'), { kind: 'Fixes', issue: 12, errors: [] });
 });
