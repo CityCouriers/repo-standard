@@ -1,0 +1,145 @@
+'use strict';
+// Szablony zgłoszeń na wyrenderowanym HTML: TEN SAM czytnik tabeli „Triage” i lista stron podpisu co w bramce audytu
+// (importowane z plików bramki, bez kopii i bez atrapy). Gdy bramki audytu albo manifestu etykiet nie ma w `main`,
+// odpowiednie testy są oczekujące (pominięte z powodem), nie zielone. Dane wyłącznie syntetyczne.
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const h = require('./helpers');
+
+const SRC = path.join(h.REPO_ROOT, '.github', 'ISSUE_TEMPLATE');
+const FIXTURE = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'issue-templates-rendered.json'), 'utf8'));
+const KINDS = ['zadanie', 'blad', 'epik'];
+const GATE = path.join(h.REPO_ROOT, '.github', 'standard', 'audit', 'issue-audit-gate.js');
+const SIDES = path.join(h.REPO_ROOT, '.github', 'standard', 'audit', 'issue-audit-sides.js');
+const LABELS_CORE = '.github/standard/labels/labels-core.json';
+const LABELS_LOCAL = '.github/labels.json';
+const LABELS_SCRIPT = '.github/standard/labels/labels_sync.js';
+
+const sha = (data) => crypto.createHash('sha256').update(data).digest('hex');
+const rawOf = (kind) => fs.readFileSync(path.join(SRC, `${kind}.md`));
+const bodyOf = (kind) => rawOf(kind).toString('utf8').replace(/^---\n[\s\S]*?\n---\n/, '');
+
+/** Wypełnienie szablonu tak samo, jak przy generowaniu fixture (polecenie w README). */
+function fill(body, area) {
+  return body.replace('P0-P4', 'P2').replace('T1-T3', 'T1').replace('area:*', area).replace(/^Podpis:.*$/m, '_— Claude Code (agent lokalny)_');
+}
+
+const gate = fs.existsSync(GATE) ? require(GATE) : null;
+const sides = fs.existsSync(SIDES) ? require(SIDES) : null;
+// Zależność etykiet (B4) uznajemy za wdrożoną, gdy jest którykolwiek z jej plików; od tej chwili brak pliku to błąd, nie skip.
+const labelsDeployed = [LABELS_CORE, LABELS_LOCAL, LABELS_SCRIPT].some((rel) => fs.existsSync(path.join(h.REPO_ROOT, ...rel.split('/'))));
+const NO_GATE = 'oczekuje: bramki audytu (czytnik „Triage”, strony podpisu) nie ma w main; test nie jest zaliczony';
+const NO_LABELS = 'oczekuje: manifestu etykiet nie ma w main; test nie jest zaliczony';
+
+function readFamilies(html) {
+  const rows = gate.triageTableRows(html);
+  return { P: gate.triageLabelFromTable(rows, 'P'), T: gate.triageLabelFromTable(rows, 'T'), area: gate.triageLabelFromTable(rows, 'area') };
+}
+
+test('fixture odpowiada aktualnym szablonom (dryf: odśwież fixture poleceniem z README)', () => {
+  assert.deepEqual(Object.keys(FIXTURE.templates).sort(), [...KINDS].sort());
+  for (const kind of KINDS) {
+    const entry = FIXTURE.templates[kind];
+    assert.equal(entry.source_sha256, sha(rawOf(kind)), `${kind}: szablon zmieniony po wygenerowaniu fixture`);
+    assert.equal(entry.filled_sha256, sha(fill(bodyOf(kind), 'area:process')), `${kind}: inny sposób wypełnienia niż w fixture`);
+    for (const key of ['unfilled', 'filled']) assert.match(entry[key], /<h2[^>]*>Triage/, `${kind}.${key}`);
+  }
+  assert.equal(FIXTURE.templates.zadanie.literal_area_sha256, sha(fill(bodyOf('zadanie'), 'area:...')));
+});
+
+test('fixture: render niewypełnionych szablonów nie zawiera znaczników spoza listy dozwolonych w komórce wartości', () => {
+  const allowed = new Set(['a', 'code', 'em', 'strong', 'b', 'i', 'br', 'p', 'del', 's', 'strike']);
+  for (const kind of KINDS) {
+    const rows = FIXTURE.templates[kind].unfilled.match(/<tr>[\s\S]*?<\/tr>/g) || [];
+    assert.equal(rows.length, 4, kind);
+    for (const row of rows) {
+      for (const cell of row.match(/<td>[\s\S]*?<\/td>/g) || []) {
+        const inner = cell.slice(4, -5);
+        for (const tag of inner.match(/<\/?([a-z0-9-]+)/gi) || []) assert.ok(allowed.has(tag.replace(/^<\/?/, '').toLowerCase()), `${kind}: znacznik ${tag}`);
+      }
+    }
+  }
+});
+
+test('niewypełniony szablon każdego rodzaju nie nadaje żadnej etykiety (P0-P4, T1-T3, area:*)', { skip: gate ? false : NO_GATE }, () => {
+  for (const kind of KINDS) assert.deepEqual(readFamilies(FIXTURE.templates[kind].unfilled), { P: '', T: '', area: '' }, kind);
+});
+
+test('wypełniony szablon każdego rodzaju daje dokładnie P, T i area', { skip: gate ? false : NO_GATE }, () => {
+  for (const kind of KINDS) assert.deepEqual(readFamilies(FIXTURE.templates[kind].filled), { P: 'P2', T: 'T1', area: 'area:process' }, kind);
+});
+
+test('literalne area:... jest czytane jako etykieta area:..., więc wzorzec go nie zawiera (przypadek czerwony)', { skip: gate ? false : NO_GATE }, () => {
+  assert.equal(readFamilies(FIXTURE.templates.zadanie.literal_area).area, 'area:...');
+  for (const kind of KINDS) assert.ok(!rawOf(kind).toString('utf8').includes('area:...'), kind);
+});
+
+test('niewypełniony szablon nie jest podpisany, wypełniony ma podpis strony Claude', { skip: sides ? false : NO_GATE }, () => {
+  for (const kind of KINDS) {
+    assert.equal(sides.signatureSide(bodyOf(kind)), '', `${kind}: niewypełniony`);
+    assert.equal(sides.signatureSide(fill(bodyOf(kind), 'area:process')), 'claude', `${kind}: wypełniony`);
+  }
+});
+
+/** Nazwy etykiet z rdzenia i z pliku lokalnego (rzeczywiste ścieżki B4); brak pliku albo zły kształt to błąd. */
+function readLabelNames(root) {
+  const names = new Set();
+  for (const rel of [LABELS_CORE, LABELS_LOCAL]) {
+    const file = path.join(root, ...rel.split('/'));
+    if (!fs.existsSync(file)) throw new Error(`brak pliku etykiet: ${rel}`);
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!Array.isArray(data.labels)) throw new Error(`${rel}: brak tablicy labels`);
+    for (const label of data.labels) names.add(label.name);
+  }
+  return names;
+}
+
+const REQUIRED_NAMES = ['P2', 'T1', 'area:process', 'needs-triage'];
+const PLACEHOLDERS = ['P0-P4', 'T1-T3', 'area:*', 'area:...'];
+
+function labelsRoot(core, local) {
+  const root = h.tmpDir();
+  if (core) h.writeFile(root, LABELS_CORE, JSON.stringify({ labels: core.map((name) => ({ name })) }));
+  if (local) h.writeFile(root, LABELS_LOCAL, JSON.stringify({ labels: local.map((name) => ({ name })) }));
+  return root;
+}
+
+test('czytnik etykiet: rdzeń i plik lokalny z rzeczywistych ścieżek B4, brak któregokolwiek pliku to błąd', () => {
+  assert.equal(LABELS_CORE, '.github/standard/labels/labels-core.json');
+  assert.equal(LABELS_LOCAL, '.github/labels.json');
+  const roots = [labelsRoot(['P2', 'T1', 'needs-triage'], ['area:process']), labelsRoot(['P2'], null), labelsRoot(null, ['area:process']), labelsRoot(null, null)];
+  try {
+    assert.deepEqual([...readLabelNames(roots[0])].sort(), ['P2', 'T1', 'area:process', 'needs-triage']);
+    assert.throws(() => readLabelNames(roots[1]), /brak pliku etykiet: \.github\/labels\.json/);
+    assert.throws(() => readLabelNames(roots[2]), /brak pliku etykiet: \.github\/standard\/labels\/labels-core\.json/);
+    assert.throws(() => readLabelNames(roots[3]), /brak pliku etykiet/);
+  } finally {
+    for (const root of roots) h.rmDir(root);
+  }
+});
+
+test('czytnik etykiet: wartości wypełnionego szablonu są w zbiorze, a placeholdery nie (kontrola zerowa i ujemna)', () => {
+  const ok = labelsRoot(['P2', 'T1', 'needs-triage'], ['area:process']);
+  const bad = labelsRoot(['P2', 'T1', 'needs-triage', 'P0-P4'], ['area:...']);
+  try {
+    const names = readLabelNames(ok);
+    for (const value of REQUIRED_NAMES) assert.ok(names.has(value), value);
+    for (const value of PLACEHOLDERS) assert.ok(!names.has(value), value);
+    const wrong = readLabelNames(bad);
+    assert.ok(wrong.has('P0-P4') && wrong.has('area:...'));
+  } finally {
+    h.rmDir(ok);
+    h.rmDir(bad);
+  }
+});
+
+// Gdy B4 jest w repozytorium, test jest obowiązkowy: brak rdzenia albo pliku lokalnego daje błąd, nie skip.
+test('wypełnione wartości są nazwami etykiet z rdzenia i pliku lokalnego, a placeholdery i area:... nimi nie są', { skip: labelsDeployed ? false : NO_LABELS }, () => {
+  const names = readLabelNames(h.REPO_ROOT);
+  for (const value of REQUIRED_NAMES) assert.ok(names.has(value), value);
+  for (const value of PLACEHOLDERS) assert.ok(!names.has(value), value);
+});

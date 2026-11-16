@@ -34,6 +34,40 @@ Wersja wzorcowa każdego elementu została wybrana według zachowania, nie wedł
 
 Elementy zależne od repozytorium (treść szablonów, sekcje dowodów w PR, łańcuch narzędzi jakości, budowa wydań, workflow lokalne) zostają w konsumencie. Standard dostarcza tylko szkielet i test spójności: `config.yml` szablonów zgłoszeń, stopkę podpisu, pierwszą linię `Fixes`/`Refs` w szablonie PR oraz test zgodności jobu `quality-gate` z parametrami.
 
+## Szablony zgłoszeń
+
+Wzorzec leży w `.github/ISSUE_TEMPLATE/` tego repozytorium (używamy go też sami); konsument dostaje te same ścieżki (rodzaj `seed`: kopiowane raz, potem sprawdzany tylko kontrakt, treść zostaje lokalna).
+
+| plik | rodzaj zgłoszenia |
+| --- | --- |
+| `zadanie.md` | zmiana, poprawka, dług techniczny, znalezisko z audytu (lokalizacje w „Kontekst i ustalenia”) |
+| `blad.md` | błąd: objaw i wpływ, odtworzenie, oczekiwane i rzeczywiste, środowisko i dowody |
+| `epik.md` | zgłoszenie zbiorcze: lista elementów, każdy w osobnym zgłoszeniu |
+| `config.yml` | `blank_issues_enabled: false`; `contact_links` dopisuje repozytorium lokalnie |
+
+Wybrano trzy rodzaje, bo tylko one różnią się czytanym przez ludzi układem; dług techniczny i funkcję pokrywa `zadanie`. Typ zgłoszenia niesie nazwa szablonu, nie osobna etykieta. Szablon audytu dokumentu, szablon operacyjny i pola projektowe (np. etap) zostają lokalne w repozytoriach, które ich potrzebują.
+
+Kontrakt (sprawdza `.github/standard/templates/template_contract.js`, markery w manifeście):
+
+- frontmatter z `name`, `about` i `labels: needs-triage`; w treści pola `**Refs:**`, `**Rola autora:**`, `**Rola recenzenta`;
+- sekcja `## Triage` z tabelą o nagłówkach `pole | wartość` i wierszami `priorytet`, `ryzyko`, `obszar`; placeholdery `P0-P4`, `T1-T3`, `area:*` to zwykły tekst i nie nadają etykiet, wypełnione wartości muszą być nazwami istniejących etykiet;
+- ostatnia linia to instrukcja podpisu (`Podpis: ...`), czyli NIE ważny podpis: niewypełniony szablon nie jest uznany za podpisany;
+- bez bajtów CR i bez półpauz i pauz poza nazwami podpisów (tylko łącznik „-”);
+- `config.yml` z `blank_issues_enabled: false`.
+
+```bash
+node .github/standard/templates/template_contract.js check [--root .]
+node --test "tests/*.test.js"
+```
+
+`check` zwraca 0 (zgodne), 1 (naruszenia kontraktu) albo 2 (błąd działania: brak katalogu szablonów, nieczytelny plik). Test na renderze (`tests/template-render.test.js`) przepuszcza wyrenderowany szablon (fixture z `POST /markdown`, tryb `gfm`) przez TEN SAM czytnik tabeli „Triage” i listę stron podpisu, których używa bramka audytu z `.github/standard/audit/`, bez kopii i bez atrapy. Dopóki bramki audytu albo manifestu etykiet nie ma w `main`, odpowiednie testy są oczekujące (pominięte z powodem), nie zielone. Odświeżenie fixture po zmianie szablonu: wyrenderuj szablon niewypełniony i wypełniony poleceniem `gh api -X POST markdown -f mode=gfm -f text=@plik` i zapisz wyniki w `tests/fixtures/issue-templates-rendered.json` razem z sumą SHA-256 źródła; test dryfu jest czerwony, gdy suma nie zgadza się z szablonem.
+
+Parametr repozytorium: lista używanych rodzajów szablonów NIE jest jeszcze częścią schematu pliku parametrów; do rozstrzygnięcia w osobnym zgłoszeniu o schemacie i w zgłoszeniu o dystrybucji. Do tego czasu `apply` kopiuje wszystkie rodzaje, a konsument usuwa niepotrzebne ręcznie (seed, `check` nie wymaga ich obecności po pierwszej kopii).
+
+Tekst do stałego promptu agentów (szablon nie wczytuje się przy zakładaniu zgłoszenia z CLI i konektora): każda sekcja wnosi fakt, decyzję, wymaganie albo dowód; bez rytualnego `N/A`; jedna wartość na wiersz „Triage”; podpis strony jako ostatnia linia treści; sekret wklejony do zgłoszenia uznaj za ujawniony.
+
+Mapowanie nazw sekcji na szkic standardu treści zgłoszeń w organizacji (wersja wstępna, nie norma): Cel = cel; „Kontekst i ustalenia” = fakty i źródła; Zakres i „Poza zakresem” = zakres i wyłączenia; „Co zamyka” = kryteria akceptacji (identyfikatory `AC-1`); „Ryzyko i wycofanie” = ryzyka.
+
 ## Plik parametrów `.github/repo-standard.json`
 
 Jedyny plik konsumenta, którego standard nigdy nie nadpisuje.
