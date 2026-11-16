@@ -10,7 +10,7 @@ const { spawnSync } = require('node:child_process');
 const gate = require('../.github/standard/audit/issue-audit-gate');
 const params = require('../.github/standard/common/params');
 const { workflowFindings } = require('./workflow-policy');
-const { REPO_ROOT, tmpDir, rmDir, writeFile } = require('./helpers');
+const { REPO_ROOT, tmpDir, rmDir, writeFile, blockLines, sparseCheckoutList } = require('./helpers');
 
 const PARAMS_FILE = path.join(REPO_ROOT, '.github', 'repo-standard.json');
 const WORKFLOW_FILE = path.join(REPO_ROOT, '.github', 'workflows', 'issue-audit.yml');
@@ -488,9 +488,9 @@ const WORKFLOW = fs.readFileSync(WORKFLOW_FILE, 'utf8');
 const codeLines = text => text.split('\n').map(line => line.replace(/(^|\s)#.*$/, ''));
 
 function blockAfter(text, key, stopKey) {
-  const match = new RegExp(key + ':\\s*>-\\s*\\n((?:[ ]+.*\\n)+?)[ ]*' + stopKey).exec(text);
-  assert.ok(match, 'brak bloku ' + key);
-  return match[1].split('\n').map(line => line.trim()).join(' ').trim();
+  const lines = blockLines(text, new RegExp('^\\s*' + key + ':\\s*>-\\s*$'), new RegExp('^\\s*' + stopKey));
+  assert.ok(lines && lines.length, 'brak bloku ' + key);
+  return lines.map(line => line.trim()).join(' ').trim();
 }
 
 // Minimalny interpreter wyrażeń GitHub Actions używanych w workflow (zero zależności).
@@ -659,8 +659,8 @@ test('AC-6: kontrakt workflow jest czerwony na wariantach z @v4, pull_request_ta
 });
 
 test('workflow: pobiera każdy plik, który bramka ładuje, oraz plik parametrów, i woła skrypt bez flag dat', () => {
-  const sparse = /sparse-checkout:\s*\|\s*\n((?:\s+\.github\/\S+\n)+)/.exec(WORKFLOW);
-  const checkedOut = sparse[1].split('\n').map(line => line.trim()).filter(Boolean);
+  const checkedOut = sparseCheckoutList(WORKFLOW);
+  assert.ok(checkedOut, 'lista sparse-checkout');
   assert.ok(checkedOut.includes('.github/repo-standard.json'));
   const seen = new Set();
   const queue = ['.github/standard/audit/issue-audit-gate.js'];

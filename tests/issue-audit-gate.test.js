@@ -15,6 +15,7 @@ const fs = require('fs');
 const path = require('path');
 
 const os = require('os');
+const { blockLines, sparseCheckoutList } = require('./helpers');
 const { execFileSync } = require('child_process');
 
 const base = require('../.github/standard/audit/issue-audit-gate.js');
@@ -1017,8 +1018,9 @@ describe('kontrakt workflow: zdarzenia komentarza i pobierane pliki', () => {
   });
 
   test('usunięcie komentarza przechodzi warunek joba niezależnie od autora usuniętego komentarza', () => {
-    const condition = /if:\s*>-\s*\n((?:\s+.*\n)+?)\s+runs-on:/.exec(workflow);
-    assert.ok(condition, 'warunek joba');
+    const lines = blockLines(workflow, /^\s*if:\s*>-\s*$/, /^\s*runs-on:/);
+    assert.ok(lines && lines.length, 'warunek joba');
+    const condition = [null, lines.join('\n')];
     assert.match(condition[1], /github\.event\.action\s*==\s*'deleted'/);
     assert.match(condition[1], /github\.event_name\s*==\s*'issues'/);
     assert.match(condition[1], /!github\.event\.issue\.pull_request/);
@@ -1026,9 +1028,8 @@ describe('kontrakt workflow: zdarzenia komentarza i pobierane pliki', () => {
   });
 
   test('workflow pobiera każdy plik, który bramka ładuje przez require', () => {
-    const sparse = /sparse-checkout:\s*\|\s*\n((?:\s+\.github\/\S+\n)+)/.exec(workflow);
-    assert.ok(sparse, 'lista sparse-checkout');
-    const checkedOut = sparse[1].split('\n').map(line => line.trim()).filter(Boolean);
+    const checkedOut = sparseCheckoutList(workflow);
+    assert.ok(checkedOut, 'lista sparse-checkout');
     const seen = new Set();
     const queue = ['.github/standard/audit/issue-audit-gate.js'];
     while (queue.length) {
