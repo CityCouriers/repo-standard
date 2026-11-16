@@ -15,7 +15,9 @@ const FIXTURE = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'iss
 const KINDS = ['zadanie', 'blad', 'epik'];
 const GATE = path.join(h.REPO_ROOT, '.github', 'standard', 'audit', 'issue-audit-gate.js');
 const SIDES = path.join(h.REPO_ROOT, '.github', 'standard', 'audit', 'issue-audit-sides.js');
-const LABEL_CANDIDATES = ['.github/standard/labels.standard.json', '.github/labels.standard.json', 'labels.standard.json'];
+const LABELS_CORE = '.github/standard/labels/labels-core.json';
+const LABELS_LOCAL = '.github/labels.json';
+const LABELS_SCRIPT = '.github/standard/labels/labels_sync.js';
 
 const sha = (data) => crypto.createHash('sha256').update(data).digest('hex');
 const rawOf = (kind) => fs.readFileSync(path.join(SRC, `${kind}.md`));
@@ -28,7 +30,8 @@ function fill(body, area) {
 
 const gate = fs.existsSync(GATE) ? require(GATE) : null;
 const sides = fs.existsSync(SIDES) ? require(SIDES) : null;
-const labelsFile = LABEL_CANDIDATES.map((rel) => path.join(h.REPO_ROOT, ...rel.split('/'))).find((file) => fs.existsSync(file));
+// Zależność etykiet (B4) uznajemy za wdrożoną, gdy jest którykolwiek z jej plików; od tej chwili brak pliku to błąd, nie skip.
+const labelsDeployed = [LABELS_CORE, LABELS_LOCAL, LABELS_SCRIPT].some((rel) => fs.existsSync(path.join(h.REPO_ROOT, ...rel.split('/'))));
 const NO_GATE = 'oczekuje: bramki audytu (czytnik „Triage”, strony podpisu) nie ma w main; test nie jest zaliczony';
 const NO_LABELS = 'oczekuje: manifestu etykiet nie ma w main; test nie jest zaliczony';
 
@@ -82,9 +85,61 @@ test('niewypełniony szablon nie jest podpisany, wypełniony ma podpis strony Cl
   }
 });
 
-test('wypełnione wartości są nazwami etykiet z zarządzanego zbioru, a placeholdery i area:... nimi nie są', { skip: labelsFile ? false : NO_LABELS }, () => {
-  const manifest = JSON.parse(fs.readFileSync(labelsFile, 'utf8'));
-  const names = new Set((Array.isArray(manifest) ? manifest : manifest.labels).map((label) => label.name));
-  for (const value of ['P2', 'T1', 'area:process', 'needs-triage']) assert.ok(names.has(value), value);
-  for (const value of ['P0-P4', 'T1-T3', 'area:*', 'area:...']) assert.ok(!names.has(value), value);
+/** Nazwy etykiet z rdzenia i z pliku lokalnego (rzeczywiste ścieżki B4); brak pliku albo zły kształt to błąd. */
+function readLabelNames(root) {
+  const names = new Set();
+  for (const rel of [LABELS_CORE, LABELS_LOCAL]) {
+    const file = path.join(root, ...rel.split('/'));
+    if (!fs.existsSync(file)) throw new Error(`brak pliku etykiet: ${rel}`);
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!Array.isArray(data.labels)) throw new Error(`${rel}: brak tablicy labels`);
+    for (const label of data.labels) names.add(label.name);
+  }
+  return names;
+}
+
+const REQUIRED_NAMES = ['P2', 'T1', 'area:process', 'needs-triage'];
+const PLACEHOLDERS = ['P0-P4', 'T1-T3', 'area:*', 'area:...'];
+
+function labelsRoot(core, local) {
+  const root = h.tmpDir();
+  if (core) h.writeFile(root, LABELS_CORE, JSON.stringify({ labels: core.map((name) => ({ name })) }));
+  if (local) h.writeFile(root, LABELS_LOCAL, JSON.stringify({ labels: local.map((name) => ({ name })) }));
+  return root;
+}
+
+test('czytnik etykiet: rdzeń i plik lokalny z rzeczywistych ścieżek B4, brak któregokolwiek pliku to błąd', () => {
+  assert.equal(LABELS_CORE, '.github/standard/labels/labels-core.json');
+  assert.equal(LABELS_LOCAL, '.github/labels.json');
+  const roots = [labelsRoot(['P2', 'T1', 'needs-triage'], ['area:process']), labelsRoot(['P2'], null), labelsRoot(null, ['area:process']), labelsRoot(null, null)];
+  try {
+    assert.deepEqual([...readLabelNames(roots[0])].sort(), ['P2', 'T1', 'area:process', 'needs-triage']);
+    assert.throws(() => readLabelNames(roots[1]), /brak pliku etykiet: \.github\/labels\.json/);
+    assert.throws(() => readLabelNames(roots[2]), /brak pliku etykiet: \.github\/standard\/labels\/labels-core\.json/);
+    assert.throws(() => readLabelNames(roots[3]), /brak pliku etykiet/);
+  } finally {
+    for (const root of roots) h.rmDir(root);
+  }
+});
+
+test('czytnik etykiet: wartości wypełnionego szablonu są w zbiorze, a placeholdery nie (kontrola zerowa i ujemna)', () => {
+  const ok = labelsRoot(['P2', 'T1', 'needs-triage'], ['area:process']);
+  const bad = labelsRoot(['P2', 'T1', 'needs-triage', 'P0-P4'], ['area:...']);
+  try {
+    const names = readLabelNames(ok);
+    for (const value of REQUIRED_NAMES) assert.ok(names.has(value), value);
+    for (const value of PLACEHOLDERS) assert.ok(!names.has(value), value);
+    const wrong = readLabelNames(bad);
+    assert.ok(wrong.has('P0-P4') && wrong.has('area:...'));
+  } finally {
+    h.rmDir(ok);
+    h.rmDir(bad);
+  }
+});
+
+// Gdy B4 jest w repozytorium, test jest obowiązkowy: brak rdzenia albo pliku lokalnego daje błąd, nie skip.
+test('wypełnione wartości są nazwami etykiet z rdzenia i pliku lokalnego, a placeholdery i area:... nimi nie są', { skip: labelsDeployed ? false : NO_LABELS }, () => {
+  const names = readLabelNames(h.REPO_ROOT);
+  for (const value of REQUIRED_NAMES) assert.ok(names.has(value), value);
+  for (const value of PLACEHOLDERS) assert.ok(!names.has(value), value);
 });
