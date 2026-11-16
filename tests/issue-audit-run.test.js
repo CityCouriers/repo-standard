@@ -680,3 +680,24 @@ test('workflow: pobiera każdy plik, który bramka ładuje, oraz plik parametró
 test('workflow: komentarz-znacznik wymienia triage i nie twierdzi, że zmieniła się wyłącznie treść', () => {
   assert.match(WORKFLOW, /kompletność triage albo komentarz z werdyktem \(edycja lub usunięcie\)/);
 });
+
+test('AC-5 (negatywny): błędny warunek `deleted` w filtrze zmienia wynik, więc testy kontraktu go wykrywają', () => {
+  const clause = "github.event.action == 'deleted' ||";
+  assert.ok(FILTER.includes(clause), 'prawdziwy filtr zawiera warunek deleted');
+  const variants = {
+    'inna akcja (removed)': FILTER.replace(clause, "github.event.action == 'removed' ||"),
+    'created zamiast deleted': FILTER.replace(clause, "github.event.action == 'created' ||"),
+    'odwrócone porównanie': FILTER.replace(clause, "github.event.action != 'deleted' ||"),
+    'brak warunku': FILTER.replace(clause, '')
+  };
+  const deletedByStranger = commentEvent('deleted', 'NONE');
+  const createdByStranger = commentEvent('created', 'NONE');
+  assert.equal(Boolean(evaluate(FILTER, deletedByStranger)), true);
+  assert.equal(Boolean(evaluate(FILTER, createdByStranger)), false);
+  for (const [name, variant] of Object.entries(variants)) {
+    assert.notEqual(variant, FILTER, name + ': wariant musi różnić się od oryginału');
+    const passesDeleted = Boolean(evaluate(variant, deletedByStranger));
+    const blocksCreated = !evaluate(variant, createdByStranger);
+    assert.ok(!passesDeleted || !blocksCreated, name + ': kontrakt (deleted przechodzi, created obcego nie) musi być złamany');
+  }
+});
