@@ -9,6 +9,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const syntax = require('../.github/standard/pr-link/pr_link_syntax');
 const { REPO_ROOT } = require('./helpers');
+const { stripCommentsOnce, stripComments } = require('./html-comments');
 
 const { parse, titleErrors } = syntax;
 const H = '#';
@@ -191,13 +192,8 @@ test('wydajność: długie wejścia kończą się szybko (bez katastrofalnego na
 });
 
 test('komentarze HTML niczego nie ukrywają: ocena obejmuje ich treść, nie jest ich wycinaniem', () => {
-  const strippedOnce = (body) => body.replace(/<!--[\s\S]*?(?:-->|--!>)/g, '');
-  // Do stanu stałego: jedno przejście może zostawić nowy komentarz złożony z resztek (np. <!-<!-- x -->- y -->).
-  const stripped = (body) => {
-    let current = body;
-    for (let next = strippedOnce(current); next !== current; next = strippedOnce(current)) current = next;
-    return current;
-  };
+  const strippedOnce = stripCommentsOnce;
+  const stripped = stripComments;
   for (const body of ['Fixes #12\n<!-- Closes #9 -->', 'Refs #12\n<!-- Fixes #13 -->', 'Fixes #12\n<!--\nukryte\nCloses #9\n-->',
     'Fixes #12\n<!-- Closes #9 --!>']) {
     assert.notDeepEqual(parse(body).errors, [], body);

@@ -20,4 +20,27 @@ function commentError(text) {
   return open ? 'niezamknięty komentarz' : null;
 }
 
-module.exports = { commentError };
+/** Jedno przejście: wycina kolejne komentarze od najbliższego początku do najbliższego końca (--> albo --!>); niezamknięty zostaje. */
+function stripCommentsOnce(text) {
+  let result = '';
+  let position = 0;
+  for (;;) {
+    const start = text.indexOf('<!--', position);
+    if (start === -1) return result + text.slice(position);
+    const close = text.indexOf('-->', start + 4);
+    const bang = text.indexOf('--!>', start + 4);
+    const found = [[close, 3], [bang, 4]].filter(([index]) => index !== -1).sort((a, b) => a[0] - b[0])[0];
+    if (found === undefined) return result + text.slice(position);
+    result += text.slice(position, start);
+    position = found[0] + found[1];
+  }
+}
+
+/** Wycinanie do stanu stałego: jedno przejście może złożyć z resztek nowy komentarz (np. <!-<!-- x -->- y -->). */
+function stripComments(text) {
+  let current = text;
+  for (let next = stripCommentsOnce(current); next !== current; next = stripCommentsOnce(current)) current = next;
+  return current;
+}
+
+module.exports = { commentError, stripCommentsOnce, stripComments };

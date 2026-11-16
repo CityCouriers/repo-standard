@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { commentError } = require('./html-comments');
+const { commentError, stripCommentsOnce, stripComments } = require('./html-comments');
 
 test('poprawne komentarze i brak komentarzy', () => {
   for (const text of ['', 'tekst', '<!-- a -->', '<!-- a --!>', 'x <!-- a --> y <!-- b --!> z', '<!-->', '<!--->', '<!-->x<!-- y -->',
@@ -31,4 +31,39 @@ test('wady: niezamknięty, zagnieżdżony, koniec bez początku', () => {
   assert.equal(commentError('a --!>'), 'koniec komentarza bez początku');
   assert.equal(commentError('<!-- a --> -->'), 'koniec komentarza bez początku');
   assert.equal(commentError('--> <!-- a -->'), 'koniec komentarza bez początku');
+});
+
+test('stripCommentsOnce: wycina komentarze od najbliższego początku do najbliższego końca', () => {
+  assert.equal(stripCommentsOnce(''), '');
+  assert.equal(stripCommentsOnce('bez komentarzy'), 'bez komentarzy');
+  assert.equal(stripCommentsOnce('a<!-- x -->b'), 'ab');
+  assert.equal(stripCommentsOnce('a<!-- x --!>b'), 'ab');
+  assert.equal(stripCommentsOnce('a<!-- x -->b<!-- y --!>c'), 'abc');
+  assert.equal(stripCommentsOnce('a<!-- x --!>b<!-- y -->c'), 'abc');
+  assert.equal(stripCommentsOnce('<!--\nwiele\nlinii\n-->tekst'), 'tekst');
+  assert.equal(stripCommentsOnce('a<!-- x --> b --> c'), 'a b --> c');
+  assert.equal(stripCommentsOnce('a<!-- x --!> b --!> c'), 'a b --!> c');
+  assert.equal(stripCommentsOnce('a<!-- x --!> b --> c'), 'a b --> c');
+  assert.equal(stripCommentsOnce('a<!-- x --> b --!> c'), 'a b --!> c');
+});
+
+test('stripCommentsOnce: niezamknięty komentarz zostaje, koniec liczony dopiero za początkiem', () => {
+  assert.equal(stripCommentsOnce('a<!-- x'), 'a<!-- x');
+  assert.equal(stripCommentsOnce('a<!-- x --> b <!-- y'), 'a b <!-- y');
+  assert.equal(stripCommentsOnce('a<!-->b'), 'a<!-->b');
+  assert.equal(stripCommentsOnce('a<!--->b'), 'a<!--->b');
+  assert.equal(stripCommentsOnce('a<!--!>b'), 'a<!--!>b');
+  assert.equal(stripCommentsOnce('a --> <!-- x -->b'), 'a --> b');
+  assert.equal(stripCommentsOnce('a --!> <!-- x --!>b'), 'a --!> b');
+});
+
+test('jedno przejście zostawia resztki, stan stały jest czysty', () => {
+  const nested = '<!-<!-- x -->- y -->';
+  assert.equal(stripCommentsOnce(nested), '<!-- y -->');
+  assert.equal(stripComments(nested), '');
+  assert.equal(stripComments('p<!-<!-- x -->- y -->q'), 'pq');
+  assert.equal(stripComments('<!-<!-<!-- a -->- b -->- c -->'), '');
+  assert.equal(stripComments('<!-<!-- x --!>- y --!>'), '');
+  assert.equal(stripComments('bez komentarzy'), 'bez komentarzy');
+  assert.equal(stripComments('a<!-- x'), 'a<!-- x');
 });
