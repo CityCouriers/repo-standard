@@ -158,7 +158,27 @@ async function startPlainServer() {
 
 const fakeSha = (seed) => crypto.createHash('sha1').update(seed).digest('hex');
 
+/**
+ * Linie bloku YAML po wierszu pasującym do `header`, do wiersza pasującego do `stop` (bez niego); `null`, gdy nagłówka nie ma.
+ * Rozbiór wiersz po wierszu zamiast jednego wyrażenia z zagnieżdżonymi powtórzeniami: nie ma nawrotów na dowolnym wejściu.
+ */
+function blockLines(text, header, stop) {
+  const lines = text.split('\n');
+  const start = lines.findIndex(line => header.test(line));
+  if (start === -1) return null;
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex(line => stop.test(line));
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
+/** Pozycje listy `sparse-checkout: |` workflow (ścieżki `.github/...`), bez pustych linii; `null`, gdy listy nie ma. */
+function sparseCheckoutList(text) {
+  const block = blockLines(text, /^\s*sparse-checkout:\s*\|\s*$/, /^(?!\s+\.github\/\S+$)/);
+  return block && block.length ? block.map(line => line.trim()) : null;
+}
+
 module.exports = {
+  blockLines, sparseCheckoutList,
   REPO_ROOT, sha256, tmpDir, rmDir, writeFile, readText, snapshot, trySymlink, run, makeRelease,
   testCert, startReleaseServer, startPlainServer, fakeSha,
 };

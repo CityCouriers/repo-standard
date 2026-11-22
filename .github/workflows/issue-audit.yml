@@ -1,0 +1,99 @@
+name: Issue audit gate
+
+# Bramka audytu specyfikacji zgłoszeń i triage (element wzorca repo-standard).
+#
+# Zgłoszenie w zakresie (`P0`/`P1`/`P2` albo `T2`/`T3`) ma jawny stan audytu: `audit:pending`, `audit:ok` albo
+# `audit:changes`. Recenzent rozstrzyga komentarzem `/audit-ok` albo `/audit-changes`; liczy się tylko komentarz strony
+# przeciwnej autorowi treści, nieedytowany po publikacji. Edycja treści unieważnia rozstrzygnięcie i cofa stan do
+# `audit:pending`. Ten sam przebieg pilnuje triage: brakujące etykiety P, T i area bierze z tabeli „Triage” w treści,
+# a gdy to nie wystarcza, nakłada `needs-triage`.
+#
+# Ten workflow NIE jest zestawem handlerów zdarzeń. Przy `cancel-in-progress: false` GitHub trzyma w grupie tylko jeden
+# przebieg oczekujący i ANULUJE go, gdy przyjdzie kolejne zdarzenie. Dlatego każdy przebieg czyta aktualny stan
+# zgłoszenia i wylicza z niego etykietę docelową (reconciler). Cała logika i jej testy żyją w
+# `.github/standard/audit/`; daty aktywacji i wyłączniki pochodzą wyłącznie z `.github/repo-standard.json`.
+#
+# Kod z domyślnej gałęzi (zwykłe `issues` i `issue_comment`, bez `pull_request_target`). Treść zgłoszenia i komentarzy
+# to wyłącznie dane: żadna jej wartość nie jest interpolowana do polecenia, a numer zgłoszenia trafia przez `env`.
+
+on:
+  issues:
+    types: [opened, edited, labeled, unlabeled, reopened]
+  # `edited` i `deleted`: komentarz edytowany po publikacji przestaje być werdyktem, a usunięty znika ze stanu.
+  issue_comment:
+    types: [created, edited, deleted]
+
+permissions: {}
+
+# Zdarzenia przechodzące filtr dzielą grupę zgłoszenia i nie anulują przebiegu w locie: reconciler ma dokończyć zapis.
+# Zdarzenie odrzucone filtrem dostaje grupę własną (`skip-<run_id>`): inaczej samo wejście do grupy zgłoszenia
+# wypierałoby oczekujący przebieg z werdyktem, mimo że samo nic nie zrobi.
+concurrency:
+  group: >-
+    ${{ (!github.event.issue.pull_request &&
+    (github.event_name == 'issues' ||
+    github.event.action == 'deleted' ||
+    contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)))
+    && format('issue-audit-{0}', github.event.issue.number) || format('issue-audit-skip-{0}', github.run_id) }}
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Reconcile audit state
+    permissions:
+      contents: read  # sparse checkout skryptów bramki i pliku parametrów
+      issues: write  # etykiety audit:*, triage i komentarz-znacznik
+    # GitHub wysyła `issue_comment` także dla pull requestów: bez tego strażnika `/audit-ok` napisane w PR
+    # manipulowałoby etykietami PR-a. Komentarze zawężamy do osób, które i tak mogą rozstrzygać; ktokolwiek inny nie
+    # pali minut Actions. Sam komentarz-znacznik publikuje `github-actions`, który tu nie przechodzi, więc nie ma
+    # pętli. Wyjątek: `deleted` przechodzi zawsze, bo usuwający komentarz bywa już kimś innym niż jego autor,
+    # a usunięty werdykt musi zmienić stan niezależnie od tego, kto go usunął.
+    if: >-
+      !github.event.issue.pull_request &&
+      (github.event_name == 'issues' ||
+       github.event.action == 'deleted' ||
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      ISSUE: ${{ github.event.issue.number }}
+    steps:
+      - name: Checkout gate script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            .github/standard/audit/issue-audit-gate.js
+            .github/standard/audit/issue-audit-html.js
+            .github/standard/audit/issue-audit-sides.js
+            .github/standard/audit/issue-audit-fetch.js
+            .github/standard/common/params.js
+            .github/repo-standard.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Reconcile audit state
+        id: gate
+        run: node .github/standard/audit/issue-audit-gate.js --issue "$ISSUE"
+
+      # Etykieta mówi, że stan się cofnął, ale nie mówi dlaczego, a historii edycji zgłoszenia nikt nie czyta.
+      # Znacznik jest śladem dla człowieka: poprawność bramki NIE zależy od tego, czy powstał.
+      - name: Leave a marker comment on reset
+        if: >-
+          steps.gate.outputs.action == 'set' &&
+          steps.gate.outputs.label == 'audit:pending' &&
+          steps.gate.outputs.previous != '' &&
+          steps.gate.outputs.previous != 'audit:pending'
+        run: |
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body \
+            "Stan audytu cofnięty z \`${STEPS_GATE_OUTPUTS_PREVIOUS}\` do \`audit:pending\`: po rozstrzygnięciu zmieniła się \
+          treść zgłoszenia, jej autorstwo (podpis, \`by:agent\`), kompletność triage albo komentarz z werdyktem (edycja lub usunięcie). \
+          Opisz w komentarzu, co się zmieniło: sama etykieta tego nie powie."
+        env:
+          STEPS_GATE_OUTPUTS_PREVIOUS: ${{ steps.gate.outputs.previous }}
