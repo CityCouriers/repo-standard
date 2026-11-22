@@ -45,6 +45,36 @@
       "sha256": "cdbfd1c4d0c1234632322403934f8eecabb2d11018d753cbf9ff70ac50e525f1"
     },
     {
+      "path": ".github/standard/audit/issue-audit-gate.js",
+      "kind": "exact",
+      "critical": true,
+      "sha256": "bfc1d2374e91eda71e4c48d341580e263dec9632035ecb71f758cbdf9f243322"
+    },
+    {
+      "path": ".github/standard/audit/issue-audit-html.js",
+      "kind": "exact",
+      "critical": true,
+      "sha256": "39003f973aba70976587cd3c2d7dbe2273757a476a218f25faff02919d12033d"
+    },
+    {
+      "path": ".github/standard/audit/issue-audit-sides.js",
+      "kind": "exact",
+      "critical": true,
+      "sha256": "ea97accc5011f5b64d56c0819226a67a8a29d6563d084c52117cdb373d28a2bc"
+    },
+    {
+      "path": ".github/standard/audit/issue-audit-fetch.js",
+      "kind": "exact",
+      "critical": true,
+      "sha256": "0d45a7634e682ea3df0ca7b16c17bdfd45251fb9c5a1aa70c9f4d4bbe18bc6fe"
+    },
+    {
+      "path": ".github/workflows/issue-audit.yml",
+      "kind": "exact",
+      "critical": true,
+      "sha256": "ed414ecf6b707f79175e48a070ea3fd9545065ff38b067d6ebb0bcecbb5c5b77"
+    },
+    {
       "path": ".github/repo-standard.json",
       "kind": "param"
     }

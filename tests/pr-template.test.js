@@ -111,10 +111,17 @@ test('podpisy w szablonie są dokładnie dwie dopuszczone formy', () => {
   assert.deepEqual(found, SIGNATURES);
 });
 
-test('podpisy zgodne ze stronami z bramki audytu (oczekuje na jej scalenie)', { todo: !fs.existsSync(path.join(h.REPO_ROOT, SIDES_FILE)) && 'bramka audytu nie jest jeszcze w main' }, () => {
-  // Gdy plik stron pojawi się w main, ten test ma porównać podpisy z szablonu ze stronami z bramki (kto wchodzi drugi,
-  // dopisuje porównanie); do tego czasu jest zawsze czerwony, żeby nie został pominięty po cichu.
-  assert.fail(`${SIDES_FILE}: dopisz porównanie podpisów szablonu ze stronami bramki audytu`);
+test('podpisy z szablonu są rozpoznawane przez moduł stron bramki audytu (rzeczywisty moduł z main)', () => {
+  assert.ok(fs.existsSync(path.join(h.REPO_ROOT, SIDES_FILE)), SIDES_FILE);
+  const sides = require('../.github/standard/audit/issue-audit-sides');
+  assert.equal(sides.signatureSide(SIGNATURES[0]), sides.CLAUDE);
+  assert.equal(sides.signatureSide(SIGNATURES[1]), sides.GPT);
+  // Podpis jest rozpoznawany jako ostatnia niepusta linia treści wypełnionego szablonu.
+  assert.equal(sides.signatureSide(filled()), sides.CLAUDE);
+  assert.equal(sides.signatureSide(filled().replace(SIGNATURES[0], SIGNATURES[1])), sides.GPT);
+  // Niewypełniony szablon (linia instrukcji zamiast podpisu) nie ustala żadnej strony: fail-closed.
+  assert.equal(sides.signatureSide(template), '');
+  assert.equal(sides.signatureSide(filled().replace(SIGNATURES[0], '')), '');
 });
 
 test('kontrola zerowa: szablon bez zmian jest zgodny z manifestem', () => {
