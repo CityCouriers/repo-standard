@@ -1,8 +1,16 @@
 # repo-standard
 
-> **Status: wersja wstępna, przed wydaniem `v1.0.0`.** Działa synchronizator `standard_sync.js` (`check`, `check --self`, `apply`), walidator pliku parametrów, manifest i CI tego repozytorium (testy, skan prywatności, skan sekretów). Pozostałe elementy z tabeli poniżej (bramka audytu, `review-gate`, `standard-drift` i inne) powstają w kolejnych zgłoszeniach. Do wydania `v1.0.0` niczego stąd nie wolno kopiować do produkcyjnych repozytoriów.
+> **Status: wersja wstępna, przed wydaniem `v1.0.0`.** Działa synchronizator `standard_sync.js` (`check`, `check --self`, `apply`), walidator pliku parametrów, manifest i CI tego repozytorium (testy, skan prywatności, skan sekretów). Działa też bramka audytu zgłoszeń z triage (workflow `issue-audit.yml`, opis w sekcji „Bramka audytu zgłoszeń”), w tym repozytorium: zgłoszenia tego repozytorium są audytowane tą bramką. Pozostałe elementy z tabeli poniżej (`review-gate`, `standard-drift` i inne) powstają w kolejnych zgłoszeniach. Do wydania `v1.0.0` niczego stąd nie wolno kopiować do produkcyjnych repozytoriów.
 
 Docelowo: wspólne przepływy GitHub Actions, skrypty bramek i szablony dla repozytoriów CityCouriers. Każdy element ma mieć jedną wersję wzorcową, a repozytorium, które go używa, kopiuje ją bez zmian i trzyma jeden mały plik parametrów. Rozjazd kopii od wzorca ma wykrywać automat.
+
+## Zasada nadrzędna repozytorium
+
+To repozytorium jest centralnym punktem standardu w obu kierunkach: wszystko, co ma być wspólne, trafia tu i stąd jest pobierane, a poprawka znaleziona w konsumencie wraca tu jako PR, nie zostaje lokalną kopią. Wersję wzorcową elementu wybiera się według zachowania, nie według tego, w którym repozytorium powstała.
+
+Opis każdego PR, który wnosi element do wzorca, zawiera tabelę: **wybrane źródło** (repozytorium i publiczny pełny SHA commita, z którego wzięto kod), **powód wyboru** oraz **dodatki z innych wersji** (co przeniesiono z innych kopii, żeby wzorzec nie zgubił ich zachowania). Zmiany względem źródła wymienia się plik po pliku, z powodem.
+
+Repozytorium wzorca nie konsumuje własnego wydania. W `.github/repo-standard.json` zostaje na stałe znacznik braku wydania: `standard.version` = `v0.0.0` i `standard.sha` złożony z samych zer (40 znaków). Jest to wartość poprawna dla schematu, ale nie wskazuje żadnego commita. Zgodność wzorca z jego własnym manifestem pilnuje `check --self`, a nie `check`.
 
 ## Zasada działania (docelowa)
 
@@ -132,6 +140,37 @@ Testy używają wyłącznie danych syntetycznych i lokalnego serwera https z cer
 ### CI tego repozytorium
 
 `.github/workflows/ci.yml`: `tests` (Node 22: testy i `check --self`), `privacy` (`scripts/ci/privacy-scan.sh`: ścieżki lokalne, katalogi domowe, adresy e-mail, identyfikatory zgłoszeń w prywatnych repozytoriach; z lokalnym plikiem wzorców spoza repozytorium, wskazanym zmienną `PRIVACY_PATTERNS_FILE`, także zadane nazwy; wzorce nie trafiają do Git ani do logów) i `secret-scan` (gitleaks z przypiętą sumą SHA-256 i kontrolą ujemną na sztucznym tokenie). Skan prywatności z lokalnym plikiem wzorców jest bramką przed wydaniem; w CI biegnie bez niego.
+
+## Bramka audytu zgłoszeń
+
+Pliki: `.github/standard/audit/issue-audit-gate.js` (reconciler i CLI), `issue-audit-sides.js` (ustalanie strony autora i werdyktu), `issue-audit-fetch.js` (odczyt przez GraphQL), `issue-audit-html.js` (czytnik HTML-a tabeli Triage) oraz `.github/workflows/issue-audit.yml`. Wszystkie są `critical` i `exact` w manifeście. Node.js, wyłącznie biblioteka standardowa, bez zależności.
+
+**Model.** Każde uruchomienie czyta bieżący stan zgłoszenia i wylicza docelową etykietę (`audit:pending`, `audit:ok`, `audit:changes`), a potem dopiero porównuje ją z obecną. Zdarzenie może zostać anulowane przez kolejne, więc wynik nie zależy od tego, które zdarzenie obudziło bieg. Workflow reaguje na `issues` (`opened`, `edited`, `labeled`, `unlabeled`, `reopened`) i `issue_comment` (`created`, `edited`, `deleted`). Komentarze innych niż właściciel, członek lub współpracownik są odrzucane w warunku jobu bez czytania ich treści, a komentarze pod PR-ami są pomijane. Grupa współbieżności `issue-audit-<numer>` obejmuje przepuszczone zdarzenia, odrzucone dostają osobną grupę jednorazową i nie anulują niczego.
+
+**Autor.** Strona autora wynika z trzech sygnałów: podpisu (`_— Claude Code (agent lokalny[, rola])_` albo `_— ChatGPT_`), etykiety `by:agent` i aplikacji, przez którą powstała treść. Rola w podpisie ma znaczenie tylko w ostatniej niepustej linii. Niezgodność sygnałów jest brakiem ważnego werdyktu.
+
+**Werdykt jest ważny**, gdy spełnia wszystkie warunki: nie był edytowany (nieznany stan edycji liczy się jak edycja), pochodzi od strony przeciwnej autorowi, jest nowszy niż bariera rewizji zgłoszenia (ostatnia edycja treści, a bez niej data utworzenia) i pochodzi od konta o roli OWNER, MEMBER albo COLLABORATOR. Werdykt wydany przed uzupełnieniem triage jest nieważny: bramka triage jest wyznaczana z osi czasu etykiet. Pominięte werdykty trafiają do logu jako kody powodów z liczbami, bez treści komentarzy.
+
+**Parametry.** Daty `audit.active_since` i `triage.active_since` pochodzą wyłącznie z `.github/repo-standard.json` (walidator `common/params.js`); w kodzie i w YAML nie ma wartości domyślnych. Pusty napis `""` w polu oznacza świadome wyłączenie tej jednej części: kod wyjścia 0, zero zmian, linia logu `wylaczone parametrem <pole>`. Brak pola, `null`, zły format albo nieistniejąca data to kod 2 i zero zmian.
+
+**Triage.** Tabela „Triage” jest czytana z `bodyHTML`, czyli z HTML-a wyrenderowanego przez GitHuba, nie z surowego Markdowna. Wymagane rodziny to P, T i area; etykieta musi pasować dokładnie (`P0`-`P4`, `T1`-`T3`, `area:*`). Etykieta `needs-triage` jest nakładana i zdejmowana przez bramkę.
+
+**Czytnik HTML-a.** Jeden przebieg po znakach ze stosem otwartych elementów, bez wyrażeń regularnych z cofaniem. Tekst pod dowolnie zagnieżdżonym `del`, `s` albo `strike` jest ukryty. Czego czytnik nie rozumie, to błąd z kodem (fail-closed): `niezamkniety-znacznik`, `niezamkniety-komentarz`, `nieoczekiwany-znak`, `za-duzo-znakow`, `za-duzo-tokenow`, `zle-zamkniecie`, `niezamkniety-element`, `tag-spoza-listy`, `atrybut-ukrywajacy`. W komórkach etykiety i wartości obowiązuje lista dozwolonych tagów i odrzucenie atrybutów `hidden`, `style`, `aria-hidden`. Encje są rozwijane po rozbiorze.
+
+**Kontrola etykiet przed zmianą.** Wymagane są etykiety audytu (gdy audyt jest aktywny), `needs-triage` (gdy triage jest aktywny) i etykiety wskazane w tabeli. Brak którejkolwiek to STOP: kod 2, lista nazw w komunikacie, zero zmian. Bramka nigdy nie tworzy etykiet. Odczyt etykiet zgłoszenia ma limit `labels(first:100)`.
+
+**Wartości `quality_gate`** w pliku parametrów tego repozytorium: workflow `ci.yml`, joby `tests`, `privacy`, `secret-scan`, wymagane przy `pull_request`, `push` i `workflow_dispatch`.
+
+**Konwencje.** Podpisy i nagłówki tabeli Triage są po polsku (nazwy to część kontraktu). Etykiet `audit:*` nie ustawia się ręcznie.
+
+**Uruchomienie i testy.**
+
+```bash
+node .github/standard/audit/issue-audit-gate.js --issue 5 --dry-run
+node --test "tests/*.test.js"
+```
+
+Testy obejmują czytnik HTML-a (w tym model wyczerpujący wszystkie ciągi tokenów do długości 6), reconciler, parametry, kontrolę etykiet, log pominiętych werdyktów i kontrakt workflow. Pomiar mutacyjny jest wykonywany Strykerem na kopii poza repozytorium.
 
 ## Zaufanie do kodu bramek
 
