@@ -230,7 +230,8 @@ function syncWithBrokenLog(failingLine, clientOptions = {}) {
     err: { error: (line) => err.push(line) },
     env: ENV,
     readFile: (file) => JSON.stringify(file === 'core.json' ? core : local),
-    client
+    client,
+    run: () => { throw new Error('gh wywołane w teście bez atrapy run'); }
   });
   return { code, err: err.join('\n'), client };
 }
@@ -252,5 +253,33 @@ test('log rzuca przy zapisie błędu operacji: w komunikacie zostaje pierwotny b
 test('błąd operacji bez wykonanych wcześniej operacji nie dopisuje listy wykonanych', () => {
   const { err } = syncWithBrokenLog(/: BŁĄD$/, { failOn: ['create:area:one'] });
   assert.doesNotMatch(err, /wykonane przed błędem/);
+  assert.match(err, /ponowny bieg planuje od nowa$/);
   assert.match(err, /\(429\)/);
+});
+
+test('domyślny odczyt plików czyta rdzeń i plik lokalny jako utf8 (napis, nie bufor)', () => {
+  const real = fs.readFileSync;
+  const calls = [];
+  const core = JSON.stringify(readCore());
+  const local = JSON.stringify(syntheticLocal());
+  fs.readFileSync = (file, encoding) => {
+    calls.push([path.basename(String(file)), encoding]);
+    return path.basename(String(file)) === 'core.json' ? core : local;
+  };
+  try {
+    const code = main(['--core', '/x/core.json', '--local', '/x/local.json', 'check'], { env: ENV, out: { log() {} }, err: { error() {} } });
+    assert.equal(code, 0);
+  } finally {
+    fs.readFileSync = real;
+  }
+  assert.deepEqual(calls, [['core.json', 'utf8'], ['local.json', 'utf8']]);
+});
+
+test('lista wykonanych przed błędem rozdziela operacje przecinkiem i spacją', () => {
+  const core = readCore();
+  const local = syntheticLocal();
+  const live = liveFor(core, local).filter((l) => !['area:one', 'area:two', 'extra'].includes(l.name));
+  const result = runMain(['sync'], { core, local, client: fakeClient(live, { failOn: ['create:extra'] }), env: ENV });
+  assert.equal(result.code, 2);
+  assert.match(result.err, /wykonane przed błędem: create area:one, create area:two$/);
 });
