@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "families": {
+    "priority": { "cardinality": "dokładnie 1 na otwarte zgłoszenie", "note": "Kolejność pracy." },
+    "risk": { "cardinality": "dokładnie 1 na otwarte zgłoszenie", "note": "Skutek błędnej zmiany, nie nakład pracy." },
+    "state": { "cardinality": "0 lub więcej" },
+    "by": { "prefix": "by:", "color": "475569", "cardinality": "0 lub 1", "note": "Brak etykiety znaczy: autorem specyfikacji jest recenzent zewnętrzny." },
+    "audit": { "prefix": "audit:", "color": "0FA5A5", "cardinality": "0 lub 1", "note": "Stan audytu specyfikacji; nadaje go wyłącznie bramka audytu." }
+  },
+  "labels": [
+    { "name": "P0", "color": "B60205", "family": "priority", "description": "Natychmiast - blokuje działanie, wydanie albo krytyczną decyzję." },
+    { "name": "P1", "color": "F97316", "family": "priority", "description": "Wysoka - następne ważne zadanie w bieżącym etapie." },
+    { "name": "P2", "color": "EAB308", "family": "priority", "description": "Średnia - zaplanowane i wartościowe, ale nie blokuje bieżącej pracy." },
+    { "name": "P3", "color": "B8C0CC", "family": "priority", "description": "Niska - backlog oportunistyczny; realizować, gdy koszt jest uzasadniony." },
+    { "name": "P4", "color": "D4D4D8", "family": "priority", "description": "Kosmetyka - tylko przy okazji innej pracy." },
+    { "name": "T1", "color": "93C5FD", "family": "risk", "description": "Niskie ryzyko - lokalny zakres, łatwe wycofanie, bez wpływu na produkcję, dane i bramki." },
+    { "name": "T2", "color": "3B82F6", "family": "risk", "description": "Średnie ryzyko - bramki, CI, proces, wydanie albo kontrakt między modułami." },
+    { "name": "T3", "color": "4338CA", "family": "risk", "description": "Wysokie ryzyko - produkcja, dane, sekrety, uprawnienia, trudne wycofanie." },
+    { "name": "blocked", "color": "111827", "family": "state", "description": "Wstrzymane do spełnienia zależności, decyzji lub zebrania danych." },
+    { "name": "needs-triage", "color": "FEF2C0", "family": "state", "description": "Czeka na triage: brakuje priorytetu, ryzyka, obszaru albo właściciela decyzji." },
+    { "name": "by:agent", "color": "475569", "family": "by", "description": "Specyfikację napisał agent lokalny; audytuje druga strona." },
+    { "name": "audit:pending", "color": "0FA5A5", "family": "audit", "description": "Specyfikacja czeka na audyt; praca się nie zaczyna. Nadaje workflow." },
+    { "name": "audit:changes", "color": "0FA5A5", "family": "audit", "description": "Recenzent zgłosił zastrzeżenia; zgłoszenie wraca do autora. Nadaje workflow." },
+    { "name": "audit:ok", "color": "0FA5A5", "family": "audit", "description": "Specyfikacja zaakceptowana w obecnej wersji treści. Nadaje workflow." }
+  ]
+}

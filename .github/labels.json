@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "repo": "CityCouriers/repo-standard",
+  "families": {
+    "area": { "prefix": "area:", "color": "0E8A16", "cardinality": "1 lub więcej" },
+    "automation": { "cardinality": "0 lub więcej" }
+  },
+  "labels": [
+    { "name": "area:process", "color": "0E8A16", "family": "area", "description": "Zasady pracy repo: kontrakt, etykiety, szablony, ochrona main, audyt, hooki." },
+    { "name": "area:quality", "color": "0E8A16", "family": "area", "description": "Bramki jakości kodu: CI, testy, reguły rozmiaru, testy mutacyjne." },
+    { "name": "area:security", "color": "0E8A16", "family": "area", "description": "Dane osobowe, sekrety, licencje i uprawnienia: co nie wchodzi do repo ani na produkcję." },
+    { "name": "area:docs", "color": "0E8A16", "family": "area", "description": "Dokumentacja techniczna wersjonowana z kodem." },
+    { "name": "dependencies", "color": "0366D6", "family": "automation", "description": "Aktualizacje zależności (Dependabot)." }
+  ],
+  "system": ["accessibility", "bug", "documentation", "duplicate", "enhancement", "good first issue", "help wanted", "invalid", "question", "wontfix"],
+  "foreign": [],
+  "migrations": { "rename": [], "delete": [] }
+}

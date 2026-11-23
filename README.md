@@ -32,7 +32,7 @@ Wersja wzorcowa każdego elementu została wybrana według zachowania, nie wedł
 | powiązanie PR ze zgłoszeniem | pierwsza linia opisu PR to `Fixes #n` albo `Refs #n`; zgłoszenie musi istnieć i być otwarte; ukryte słowa zamykające są błędem; PR Dependabota jest wyjątkiem | brak |
 | strażnik wersji roboczej | job zbiorczy: PR w Draft jest zawsze czerwony; poza Draft wymagane joby muszą mieć `success`, pozostałe `skipped`; brak wyniku albo wynik nieznany jest czerwony | `quality_gate.jobs`, `quality_gate.required` |
 | bramka przeglądu `review-gate` | zielona, gdy ostatni ważny werdykt strony przeciwnej wskazuje pełny SHA HEAD, powiązane zgłoszenia mają `audit:ok`, a zmiana plików bramek ma linię „Zmiana bramki: zaakceptowana”; kod z domyślnej gałęzi | `review_gate.protected_paths` |
-| etykiety | manifest standardu (`labels.standard.json`) scalany z lokalnym `labels.json`; synchronizacja zapisuje tylko z domyślnej gałęzi i weryfikuje stan po zmianie; etykieta spoza obu plików łamie zgodność | lokalny `labels.json` |
+| etykiety | rdzeń etykiet (`labels-core.json`: P, T, `blocked`, `needs-triage`, `by:agent`, `audit:*`) kopiowany bez zmian, plus lokalny `.github/labels.json` poza manifestem; synchronizacja zapisuje tylko z domyślnej gałęzi, w dwóch fazach, i weryfikuje stan po zmianie; rdzeń jest nieusuwalny; etykieta spoza obu plików łamie zgodność, ale nie jest ruszana | lokalny `.github/labels.json` |
 | skan sekretów `secret-scan` | gitleaks z przypiętą wersją i sumą SHA-256: zakres PR, push, ręczny `--all` i bieg tygodniowy `--all` | opcjonalny `.gitleaks.toml` |
 | kontrola workflow `workflow-lint` | actionlint z przypiętą wersją i sumą; osobny workflow z filtrem ścieżek, niewymagany | brak |
 | polityka workflow | wszystkie `uses:` spoza repozytorium na pełnym SHA z komentarzem wersji, `permissions: {}` na poziomie workflow, literalny runner GitHub-hosted dla wyzwalaczy PR | brak |
@@ -137,6 +137,54 @@ node --test "tests/*.test.js"
 ```
 
 Testy obejmują czytnik HTML-a (w tym model wyczerpujący wszystkie ciągi tokenów do długości 6), reconciler, parametry, kontrolę etykiet, log pominiętych werdyktów i kontrakt workflow. Pomiar mutacyjny jest wykonywany Strykerem na kopii poza repozytorium.
+
+## Etykiety
+
+Pliki: `.github/standard/labels/labels-core.json` (rdzeń), `.github/standard/labels/labels_sync.js` (walidacja, plan, synchronizacja) i `.github/workflows/labels-sync.yml`. Wszystkie trzy są `exact` i `critical` w manifeście. Node.js, wyłącznie biblioteka standardowa, bez zależności.
+
+**Rdzeń i część lokalna.** Rdzeń to etykiety, na których opiera się proces: priorytety `P0`-`P4`, ryzyka `T1`-`T3`, `blocked`, `needs-triage`, `by:agent` i `audit:pending`, `audit:changes`, `audit:ok`. Konsument kopiuje je bez zmian (opisy w ASCII z łącznikiem `-`, kolory stałe w rodzinach). Resztę opisuje lokalny plik `.github/labels.json`: `repo`, obszary `area:*` (co najmniej jeden), własne rodziny, klasyfikacja etykiet cudzych (`system` dla domyślnych etykiet GitHuba, `foreign` dla etykiet integracji) i `migrations`. Plik lokalny NIE jest wpisem `manifest.json`: `apply` go nie tworzy, nie nadpisuje i nie sprawdza jego sumy, a `check --self` go nie liczy do rozjazdu. Jego kontrakt (schemat, brak redefinicji nazw rdzenia, spójność prefiksów i kolorów rodzin, minimum jedna etykieta `area:`, `repo` zgodne z `GITHUB_REPOSITORY`) sprawdza `labels_sync.js check`, a brak pliku to błąd. Rozjazd rdzenia wykrywa `standard_sync.js check`; zmiany pliku lokalnego nie wykrywa, bo ta część należy do konsumenta. Przykład minimalnego pliku lokalnego: [`.github/labels.json`](.github/labels.json) w tym repozytorium.
+
+```json
+{
+  "schema": 1,
+  "repo": "wlasciciel/nazwa",
+  "families": { "area": { "prefix": "area:", "color": "0E8A16" } },
+  "labels": [ { "name": "area:docs", "color": "0E8A16", "family": "area", "description": "Dokumentacja." } ],
+  "system": ["bug", "documentation", "enhancement"],
+  "foreign": [],
+  "migrations": { "rename": [], "delete": [] }
+}
+```
+
+**Polecenia.**
+
+```bash
+node .github/standard/labels/labels_sync.js check
+node .github/standard/labels/labels_sync.js diff [--live plik.json] [--strict]
+node .github/standard/labels/labels_sync.js sync [--dry-run]
+```
+
+`check` działa offline. `diff` porównuje manifest z żywym stanem (z `--strict` rozjazd to kod 1). `sync` zapisuje zmiany; `--dry-run` tylko planuje i odczytuje użycie etykiet do usunięcia. Repozytorium: `--repo` albo `GITHUB_REPOSITORY`. Kody wyjścia: 0 zgodne, 1 rozjazd albo odmowa (konflikt nazw, etykieta w użyciu), 2 błąd działania (zły manifest, brak pliku, błąd sieci albo uprawnień). Walidacja i kontrole przed zapisem nie zostawiają żadnego zapisu.
+
+**Walidacja.** Nazwa do 50 znaków, opis (niepusty) do 100, kolor 6 znaków hex, tekst w NFC, bez znaków sterujących, bez U+FFFD i bez pauz w opisie; unikalność bez względu na wielkość liter; prefiks rodziny należy tylko do jej etykiet; etykieta lokalna nie może mieć nazwy rdzenia ani prefiksu rodziny rdzenia (`audit:`, `by:`); nieznane pola w plikach to błąd.
+
+**Etykiety nieznane.** Etykieta w repozytorium spoza rdzenia, pliku lokalnego, `system` i `foreign` jest niesklasyfikowana: łamie zgodność (kod 1 z `--strict` i po zapisie), ale nigdy nie jest usuwana ani zmieniana. Etykieta z `system` albo `foreign` nieobecna w repozytorium jest tylko odnotowana.
+
+**Zapis w dwóch fazach.** API GitHuba nie jest transakcyjne, więc skrypt nie obiecuje atomowości, tylko bezpieczny przebieg i możliwość wznowienia. Faza 1 (bez zapisu): walidacja, odczyt stanu, pełny plan, sprawdzenie konfliktów, odczyt użycia każdej etykiety do usunięcia i próba zapisu (aktualizacja istniejącej etykiety do jej własnych wartości). Faza 2: operacje w kolejności zmiana nazwy, utworzenie, poprawka, usunięcie, z linią logu dla każdej. Pierwszy błąd (np. 429, 403, 5xx) przerywa zapis kodem 2 i usunięcia nie są wykonywane. Ponowny bieg liczy plan od nowa ze stanu żywego, więc nie dubluje etykiet. Po zapisie skrypt czyta stan jeszcze raz i porównuje z manifestem; rozjazd to kod 1. Odczyt etykiet i zgłoszeń stronicuje do końca (`gh api --paginate`): błąd na dowolnej stronie albo wiersz, którego nie da się odczytać, to kod 2.
+
+**Rdzeń nieusuwalny, usuwanie lokalne.** Wpis w `migrations.delete` albo `migrations.rename` z nazwą rdzenia (w dowolnej wielkości liter) jest błędem walidacji, a wpis w `delete` musi być napisem: nie ma żadnej flagi „usuń mimo użycia”. Zmiana albo usunięcie etykiety rdzenia wymaga nowego wydania wzorca w wersji MAJOR, osobnego zgłoszenia i dowodu zachowania historii audytu. Usunięcie etykiety lokalnej wykonuje się tylko wtedy, gdy żadne zgłoszenie ani PR (wszystkie stany) jej nie ma: odczyt w fazie 1 i ponownie tuż przed usunięciem; etykieta w użyciu zatrzymuje całość (kod 1). Usunięcie etykiety w użyciu to osobna decyzja właściciela i ręczne zdjęcie przypisań poza skryptem.
+
+**Workflow.** `push` na domyślną gałąź (zmiany manifestu etykiet, skryptu albo workflow) uruchamia zapis; `pull_request` uruchamia tylko `check` offline, bez tokenu; `workflow_dispatch` ma `dry_run` domyślnie `true`. Zapis jest warunkiem joba na `refs/heads/main` i bez `dry_run`; inne uruchomienia biegną jako plan z `issues: read`. `permissions: {}` na poziomie workflow, minimalne uprawnienia w jobach, akcje na pełnym SHA, `persist-credentials: false`, `ubuntu-24.04`, token tylko przez `env`.
+
+**Zgodność z bramką audytu.** Bramka audytu nie tworzy etykiet i zatrzymuje się, gdy brakuje `audit:*`, `needs-triage` albo etykiet z tabeli „Triage”. Kolejność u konsumenta: najpierw synchronizacja etykiet, potem włączenie bramki. `area:*` z tabeli „Triage” musi istnieć w pliku lokalnym. Test zgodności pilnuje, żeby etykiety wymagane przez bramkę były w rdzeniu.
+
+**Uruchomienie testów.**
+
+```bash
+node --test "tests/labels-*.test.js"
+```
+
+Testy używają atrapy klienta GitHub i danych syntetycznych, bez sieci i bez `gh`; testy `apply` używają lokalnego serwera https jak pozostałe testy wzorca. Pomiar mutacyjny skryptu jest wykonywany Strykerem.
 
 ## Zaufanie do kodu bramek
 
