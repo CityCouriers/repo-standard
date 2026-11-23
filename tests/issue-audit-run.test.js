@@ -40,6 +40,7 @@ const EXPECTED_PARAMS = {
     }
   },
   review_gate: { protected_paths: [] },
+  drift: { strict: false },
   overrides: []
 };
 

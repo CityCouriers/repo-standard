@@ -28,6 +28,7 @@ const https = require('node:https');
 const path = require('node:path');
 const { parseArgs } = require('node:util');
 const params = require('./common/params');
+const overridesApi = require('./common/overrides_api');
 
 const STANDARD_REPO = 'CityCouriers/repo-standard';
 const MANIFEST_PATH = 'manifest.json';
@@ -250,14 +251,20 @@ function checkSelf(manifest, root, todayMs) {
   return { findings, notes };
 }
 
-function checkConsumer(manifest, root, consumerParams, todayMs) {
-  const { errors, notes } = params.overrideFindings(manifest, consumerParams.overrides, todayMs);
-  const findings = [...errors];
+/**
+ * Kontrola konsumenta. `verified` ({ approved: Set ścieżek, notes }) podaje wyłącznie `check --verify-overrides`
+ * po sprawdzeniu stanu zgłoszeń przez API; bez niego żadne odstępstwo nie jest uznane (pliki sprawdzane zawsze).
+ */
+function checkConsumer(manifest, root, consumerParams, todayMs, verified) {
+  const found = params.overrideFindings(manifest, consumerParams.overrides, todayMs);
+  const notes = verified ? verified.notes : found.notes;
+  const findings = [...found.errors];
   for (const entry of manifest.files) {
     if (entry.kind === 'param') {
       if (readPlainFile(root, entry.path) === null) findings.push(`${entry.path}: brak pliku parametrów`);
       continue;
     }
+    if (verified && verified.approved.has(entry.path)) continue;
     findings.push(...entryFinding(entry, readPlainFile(root, entry.path)));
   }
   return { findings, notes };
@@ -491,16 +498,21 @@ function defaultParams() {
     triage: { active_since: '' },
     quality_gate: { workflow: 'quality.yml', jobs: ['tests'], required: Object.fromEntries(params.EVENTS.map((event) => [event, ['tests']])) },
     review_gate: { protected_paths: [] },
+    drift: { strict: false },
     overrides: [],
   };
 }
 
 /** Pliki do zapisu; wszystko pobrane i zweryfikowane w pamięci przed jakimkolwiek zapisem. */
-async function planApply(manifest, root, endpoints, repo, sha, fetch) {
+async function planApply(manifest, root, endpoints, repo, sha, fetch, skipPaths = new Set()) {
   const writes = [];
   const notes = [];
   for (const entry of manifest.files) {
     if (entry.kind === 'param') continue;
+    if (skipPaths.has(entry.path)) {
+      notes.push(`${entry.path}: odstępstwo, plik pominięty (stan zgłoszenia sprawdza check --verify-overrides)`);
+      continue;
+    }
     const data = await fetch(rawUrl(endpoints, repo, sha, entry.source || entry.path));
     const existing = readPlainFile(root, entry.path);
     if (entry.kind === 'block') {
@@ -544,15 +556,15 @@ async function runApply(args, env, deps) {
   assertPlainPath(root, params.PARAMS_PATH);
   const paramsData = readPlainFile(root, params.PARAMS_PATH);
   const paramsValue = paramsData === null ? defaultParams() : loadConsumerParams(paramsData);
-  const { errors, notes: overrideNotes } = params.overrideFindings(manifest, paramsValue.overrides, deps.todayMs);
+  const { errors, active } = params.overrideFindings(manifest, paramsValue.overrides, deps.todayMs);
   if (errors.length) throw new SyncError(`odstępstwa w pliku parametrów niepoprawne: ${errors.join('; ')}`);
 
-  const { writes, notes } = await planApply(manifest, root, deps.endpoints, repo, sha, deps.fetch);
+  const { writes, notes } = await planApply(manifest, root, deps.endpoints, repo, sha, deps.fetch, new Set(active.map((override) => override.path)));
   paramsValue.standard = { version: manifest.version, sha };
   writes.push({ path: params.PARAMS_PATH, content: dumpJson(paramsValue) });
   for (const write of writes) assertPlainPath(root, write.path);
 
-  const lines = [...overrideNotes.map((note) => `${note}; plik nadpisany zgodnie z manifestem`), ...notes];
+  const lines = [...notes];
   if (!args['dry-run']) applyWrites(root, writes, deps.hooks);
   lines.unshift(...writes.map((write) => `${write.path}: ${args['dry-run'] ? 'do zapisu' : 'zapisany'}`));
   lines.push(`${params.PARAMS_PATH}: standard ${manifest.version} ${sha}`);
@@ -580,7 +592,15 @@ async function runCheck(args, env, deps) {
   const manifest = await fetchManifest(deps.endpoints, STANDARD_REPO, pin.sha, deps.fetch);
   const findings = [];
   if (manifest.version !== pin.version) findings.push(`manifest po SHA ${pin.sha.slice(0, 12)} to ${manifest.version}, a plik parametrów mówi ${pin.version}`);
-  const result = checkConsumer(manifest, root, consumerParams, deps.todayMs);
+  let verified;
+  if (args['verify-overrides']) {
+    const repo = env.GITHUB_REPOSITORY;
+    if (!repo || !env.GITHUB_TOKEN) throw new SyncError('--verify-overrides wymaga zmiennych GITHUB_REPOSITORY i GITHUB_TOKEN');
+    const { active } = params.overrideFindings(manifest, consumerParams.overrides, deps.todayMs);
+    const getJson = deps.apiGet || overridesApi.makeApiGet({ token: env.GITHUB_TOKEN });
+    verified = await overridesApi.verifyOverrides(active, repo, deps.endpoints, getJson);
+  }
+  const result = checkConsumer(manifest, root, consumerParams, deps.todayMs, verified);
   findings.push(...result.findings);
   report(`standard_sync check (${pin.version}): ${findings.length ? 'rozjazd' : 'zgodne'}`,
     [...findings, ...result.notes, ...(findings.length ? [] : ['pliki zgodne z manifestem'])], env);
@@ -609,6 +629,7 @@ const OPTIONS = {
   version: { type: 'string' },
   sha: { type: 'string' },
   'dry-run': { type: 'boolean', default: false },
+  'verify-overrides': { type: 'boolean', default: false },
 };
 
 /** Punkt wejścia (też dla testów): `deps` = { fetch, endpoints, now, hooks }. Zwraca kod wyjścia. */
@@ -618,12 +639,14 @@ async function main(argv, env = process.env, deps = {}) {
     const command = positionals[0];
     if (positionals.length !== 1 || !['check', 'apply'].includes(command)) throw new SyncError('użycie: standard_sync.js check [--self] | apply --version vX.Y.Z');
     if (command === 'apply' && values.self) throw new SyncError('--self dotyczy tylko check');
+    if (values['verify-overrides'] && (command !== 'check' || values.self)) throw new SyncError('--verify-overrides dotyczy tylko check (bez --self)');
     if (command === 'check' && (values.version !== undefined || values.sha !== undefined || values['dry-run'])) throw new SyncError('--version, --sha i --dry-run dotyczą tylko apply');
     const full = {
       fetch: deps.fetch || makeHttpGet(),
       endpoints: deps.endpoints || DEFAULT_ENDPOINTS,
       todayMs: todayUtcMs(deps.now || new Date()),
       hooks: deps.hooks,
+      apiGet: deps.apiGet,
     };
     return await (command === 'check' ? runCheck : runApply)(values, env, full);
   } catch (error) {

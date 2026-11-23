@@ -62,7 +62,7 @@ function consumerParams({ overrides = [], standard = { version: 'v1.0.0', sha: S
   return {
     schema: 1, standard, audit: { active_since: '' }, triage: { active_since: '' },
     quality_gate: { workflow: 'quality.yml', jobs: ['tests'], required: { pull_request: ['tests'], push: ['tests'], workflow_dispatch: ['tests'] } },
-    review_gate: { protected_paths: [] }, overrides,
+    review_gate: { protected_paths: [] }, drift: { strict: false }, overrides,
   };
 }
 
@@ -121,7 +121,7 @@ test('apply: dokładne wyjście, domyślne parametry i zapis na końcu', async (
   const expected = {
     schema: 1, standard: { version: 'v1.0.0', sha: SHA }, audit: { active_since: '' }, triage: { active_since: '' },
     quality_gate: { workflow: 'quality.yml', jobs: ['tests'], required: { pull_request: ['tests'], push: ['tests'], workflow_dispatch: ['tests'] } },
-    review_gate: { protected_paths: [] }, overrides: [],
+    review_gate: { protected_paths: [] }, drift: { strict: false }, overrides: [],
   };
   assert.equal(h.readText(root, P), `${JSON.stringify(expected, null, 2)}\n`);
   assert.equal(net.calls[0], `${ENDPOINTS.api}/repos/${REPO}/git/ref/tags/v1.0.0`);
@@ -176,11 +176,11 @@ test('apply: odstępstwa w pliku parametrów (błędy łączone średnikiem i no
   assert.equal(accepted.code, 0, accepted.out);
   assert.equal(accepted.out, [
     '## standard_sync apply v1.0.0',
-    `- x/open.yml: zapisany`,
     `- ${P}: zapisany`,
-    `- odstępstwo x/open.yml: ${params.UNVERIFIED_NOTE}, nie jest uznane; plik nadpisany zgodnie z manifestem`,
+    '- x/open.yml: odstępstwo, plik pominięty (stan zgłoszenia sprawdza check --verify-overrides)',
     `- ${P}: standard v1.0.0 ${SHA}`,
   ].join('\n'));
+  assert.ok(!fs.existsSync(path.join(root, 'x', 'open.yml')), 'plik z odstępstwem nie jest zapisywany');
   const written = JSON.parse(h.readText(root, P));
   assert.deepEqual(written.standard, { version: 'v1.0.0', sha: SHA });
   assert.deepEqual(written.overrides, good, 'odstępstwa zachowane');
@@ -351,6 +351,124 @@ test('check: data z deps.now rozstrzyga o wygaśnięciu odstępstwa', async (t) 
   assert.equal(today.code, 1, 'bez deps.now liczy się dzisiejsza data: odstępstwo wygasło');
 });
 
+// ------------------------------------------------------------------ check --verify-overrides
+
+const VERIFY_ENV = { GITHUB_REPOSITORY: 'o/r', GITHUB_TOKEN: 'token-testowy' };
+const verifyRelease = () => h.makeRelease({ 'x/open.yml': 'O\n', 'tools/a.js': '// a\n' }, { entries: [{ path: 'x/open.yml', kind: 'exact', overridable: true }, { path: 'tools/a.js', kind: 'exact' }] });
+const verifyRoot = (t, until = '2026-12-01') => consumerRoot(t, {
+  params: consumerParams({ overrides: [{ path: 'x/open.yml', reason: 'r', until, issue: ISSUE }] }),
+  files: { 'x/open.yml': 'LOKALNIE\n', 'tools/a.js': '// a\n' },
+});
+const issueReply = (extra = {}) => ({ number: 1, state: 'open', labels: [{ name: 'audit:ok' }], ...extra });
+const fakeApi = (reply) => {
+  const calls = [];
+  const apiGet = async (url) => {
+    calls.push(url);
+    if (reply instanceof Error) throw reply;
+    return reply;
+  };
+  return { apiGet, calls };
+};
+
+test('check --verify-overrides: zgłoszenie otwarte z audit:ok uznaje odstępstwo i pomija plik', async (t) => {
+  const root = verifyRoot(t);
+  const api = fakeApi(issueReply());
+  const result = await runIO(checkArgs(root, ['--verify-overrides']), { ...fakeNet(verifyRelease()).deps, apiGet: api.apiGet }, VERIFY_ENV);
+  assert.deepEqual([result.code, result.out], [0, [
+    '## standard_sync check (v1.0.0): zgodne',
+    `- odstępstwo x/open.yml: uznane do 2026-12-01 (zgłoszenie ${ISSUE} otwarte, audit:ok)`,
+    '- pliki zgodne z manifestem',
+  ].join('\n')]);
+  assert.deepEqual(api.calls, [`${ENDPOINTS.api}/repos/o/r/issues/1`]);
+  const plain = await runIO(checkArgs(root), fakeNet(verifyRelease()).deps, VERIFY_ENV);
+  assert.equal(plain.code, 1, 'bez --verify-overrides odstępstwo nie jest uznane, a plik jest sprawdzany');
+  assert.match(plain.out, /- x\/open\.yml: rozjazd/);
+});
+
+test('check --verify-overrides: nieuznane zgłoszenie zostawia rozjazd pliku z powodem w nocie', async (t) => {
+  const cases = [
+    [issueReply({ state: 'closed' }), 'zgłoszenie nie jest otwarte'],
+    [issueReply({ labels: [] }), 'zgłoszenie bez etykiety audit:ok'],
+    [issueReply({ pull_request: {} }), 'wskazano PR, a nie zgłoszenie'],
+  ];
+  for (const [reply, reason] of cases) {
+    const result = await runIO(checkArgs(verifyRoot(t), ['--verify-overrides']), { ...fakeNet(verifyRelease()).deps, apiGet: fakeApi(reply).apiGet }, VERIFY_ENV);
+    assert.equal(result.code, 1, reason);
+    assert.equal(result.out, [
+      '## standard_sync check (v1.0.0): rozjazd',
+      '- x/open.yml: rozjazd, suma SHA-256 różni się od manifestu',
+      `- odstępstwo x/open.yml: nieuznane: ${reason} (${ISSUE})`,
+    ].join('\n'), reason);
+  }
+});
+
+test('check --verify-overrides: wygasłe odstępstwo nie trafia do API', async (t) => {
+  const api = fakeApi(issueReply());
+  const result = await runIO(checkArgs(verifyRoot(t, '2026-11-01'), ['--verify-overrides']), { ...fakeNet(verifyRelease()).deps, apiGet: api.apiGet }, VERIFY_ENV);
+  assert.equal(result.code, 1);
+  assert.match(result.out, /odstępstwo wygasło 2026-11-01: x\/open\.yml/);
+  assert.deepEqual(api.calls, []);
+});
+
+test('check --verify-overrides: błąd API albo brak zmiennych to kod 2 (fail-closed)', async (t) => {
+  const root = verifyRoot(t);
+  const deps = (api) => ({ ...fakeNet(verifyRelease()).deps, apiGet: api });
+  const apiError = await runIO(checkArgs(root, ['--verify-overrides']), deps(fakeApi(Object.assign(new Error('https://api.test/x: status 503'), { name: 'OverrideApiError' })).apiGet), VERIFY_ENV);
+  assert.deepEqual([apiError.code, apiError.out], [2, '## standard_sync: przerwano\n- OverrideApiError: https://api.test/x: status 503']);
+  const message = abort('--verify-overrides wymaga zmiennych GITHUB_REPOSITORY i GITHUB_TOKEN');
+  for (const env of [{}, { GITHUB_REPOSITORY: 'o/r' }, { GITHUB_TOKEN: 'x' }, { GITHUB_REPOSITORY: '', GITHUB_TOKEN: 'x' }, { GITHUB_REPOSITORY: 'o/r', GITHUB_TOKEN: '' }]) {
+    const result = await runIO(checkArgs(root, ['--verify-overrides']), deps(fakeApi(issueReply()).apiGet), env);
+    assert.deepEqual([result.code, result.out], [2, message], JSON.stringify(env));
+  }
+  const badRepo = await runIO(checkArgs(root, ['--verify-overrides']), deps(fakeApi(issueReply()).apiGet), { ...VERIFY_ENV, GITHUB_REPOSITORY: 'zle' });
+  assert.deepEqual([badRepo.code, badRepo.out], [2, '## standard_sync: przerwano\n- OverrideApiError: GITHUB_REPOSITORY: oczekiwano postaci wlasciciel/repo']);
+});
+
+test('check --verify-overrides: bez deps.apiGet klient API dostaje token ze środowiska', async (t) => {
+  const overridesApi = require('../.github/standard/common/overrides_api');
+  const original = overridesApi.makeApiGet;
+  const seen = [];
+  overridesApi.makeApiGet = (options) => { seen.push(options); return fakeApi(issueReply()).apiGet; };
+  try {
+    const result = await runIO(checkArgs(verifyRoot(t), ['--verify-overrides']), fakeNet(verifyRelease()).deps, VERIFY_ENV);
+    assert.equal(result.code, 0, result.out);
+  } finally {
+    overridesApi.makeApiGet = original;
+  }
+  assert.deepEqual(seen, [{ token: 'token-testowy' }]);
+});
+
+test('--verify-overrides: dozwolone tylko dla check bez --self', async () => {
+  const message = abort('--verify-overrides dotyczy tylko check (bez --self)');
+  for (const argv of [['apply', '--version', 'v1.0.0', '--verify-overrides'], ['check', '--self', '--verify-overrides']]) {
+    const result = await runIO(argv, {}, VERIFY_ENV);
+    assert.deepEqual([result.code, result.out], [2, message], argv.join(' '));
+  }
+});
+
+test('apply: odstępstwo (składnia poprawna) pomija plik bez pobierania go ze źródła', async (t) => {
+  const release = verifyRelease();
+  const root = verifyRoot(t);
+  h.writeFile(root, 'tools/a.js', '// stare\n');
+  const net = fakeNet(release);
+  const result = await runIO(applyArgs(root), net.deps);
+  assert.equal(result.code, 0, result.out);
+  assert.equal(result.out, [
+    '## standard_sync apply v1.0.0',
+    '- tools/a.js: zapisany',
+    `- ${P}: zapisany`,
+    '- x/open.yml: odstępstwo, plik pominięty (stan zgłoszenia sprawdza check --verify-overrides)',
+    `- ${P}: standard v1.0.0 ${SHA}`,
+  ].join('\n'));
+  assert.equal(h.readText(root, 'x/open.yml'), 'LOKALNIE\n');
+  assert.equal(h.readText(root, 'tools/a.js'), '// a\n');
+  assert.ok(!net.calls.includes(sync.rawUrl(ENDPOINTS, REPO, SHA, 'x/open.yml')));
+  const expired = verifyRoot(t, '2026-11-01');
+  const rejected = await runIO(applyArgs(expired), fakeNet(release).deps);
+  assert.equal(rejected.code, 2, 'wygasłe odstępstwo to błąd, nie pominięcie');
+  assert.equal(h.readText(expired, 'x/open.yml'), 'LOKALNIE\n');
+});
+
 // ------------------------------------------------------------------ check --self i punkt wejścia
 
 function selfRoot(t) {
@@ -453,7 +571,7 @@ async function serve(t, handler, options) {
   return { port, base: `https://localhost:${port}`, fetch: sync.makeHttpGet({ ca: cert.cert, ...options }) };
 }
 
-test('klient https: nagłówki, metoda i treść odpowiedzi', { skip: SKIP }, async (t) => {
+test('klient https: nagłówki, metoda i treść odpowiedzi', { skip: SKIP, timeout: 8000 }, async (t) => {
   const seen = [];
   const server = await serve(t, (req, res) => { seen.push([req.method, req.headers['user-agent'], req.headers.accept]); res.end('treść'); });
   const body = await server.fetch(`${server.base}/x`);
@@ -461,7 +579,7 @@ test('klient https: nagłówki, metoda i treść odpowiedzi', { skip: SKIP }, as
   assert.deepEqual(seen, [['GET', 'repo-standard-sync', '*/*']]);
 });
 
-test('klient https: błędy adresu, statusu i połączenia', { skip: SKIP }, async (t) => {
+test('klient https: błędy adresu, statusu i połączenia', { skip: SKIP, timeout: 8000 }, async (t) => {
   const server = await serve(t, (req, res) => { res.statusCode = 500; res.end('x'); });
   await assert.rejects(server.fetch('to nie jest adres'), (error) => error instanceof sync.SyncError && error.message === 'zły adres: to nie jest adres');
   await assert.rejects(server.fetch(`${server.base}/x`), (error) => error instanceof sync.SyncError && error.message === `pobranie ${server.base}/x: status 500`);
@@ -476,7 +594,7 @@ test('klient https: błędy adresu, statusu i połączenia', { skip: SKIP }, asy
   assert.ok(url.length > 0);
 });
 
-test('klient https: przekierowania (względne, limit, brak adresu, inny host)', { skip: SKIP }, async (t) => {
+test('klient https: przekierowania (względne, limit, brak adresu, inny host)', { skip: SKIP, timeout: 8000 }, async (t) => {
   const server = await serve(t, (req, res) => {
     const hop = /^\/r\/(\d+)$/.exec(req.url);
     if (req.url === '/bez-adresu') { res.statusCode = 302; return res.end(); }
@@ -491,7 +609,7 @@ test('klient https: przekierowania (względne, limit, brak adresu, inny host)', 
   await assert.rejects(server.fetch(`${server.base}/inny-host`), (error) => error.message === `przekierowanie poza ten sam host: https://127.0.0.1:${server.port}/x`);
 });
 
-test('klient https: przerwana odpowiedź to SyncError z nazwą adresu, a nie przekroczenie czasu', { skip: SKIP }, async (t) => {
+test('klient https: przerwana odpowiedź to SyncError z nazwą adresu, a nie przekroczenie czasu', { skip: SKIP, timeout: 8000 }, async (t) => {
   const server = await serve(t, (req, res) => {
     res.writeHead(200, { 'Content-Length': '100' });
     res.write('abc');
@@ -501,7 +619,7 @@ test('klient https: przerwana odpowiedź to SyncError z nazwą adresu, a nie prz
   await assert.rejects(server.fetch(url), (error) => error instanceof sync.SyncError && error.message.startsWith(`pobranie ${url}: `) && !error.message.includes('przekroczono czas'));
 });
 
-test('klient https: limit rozmiaru i czas oczekiwania', { skip: SKIP }, async (t) => {
+test('klient https: limit rozmiaru i czas oczekiwania', { skip: SKIP, timeout: 8000 }, async (t) => {
   const server = await serve(t, (req, res) => {
     if (req.url === '/dokladnie') return res.end(Buffer.alloc(5000000, 97));
     if (req.url === '/za-duzo') return res.end(Buffer.alloc(5000001, 97));
@@ -518,7 +636,7 @@ test('klient https: limit rozmiaru i czas oczekiwania', { skip: SKIP }, async (t
 const busySockets = (port) => Object.entries(https.globalAgent.sockets).filter(([key]) => key.includes(`:${port}:`)).reduce((count, [, list]) => count + list.length, 0);
 const settle = () => new Promise((resolve) => setTimeout(resolve, 300));
 
-test('klient https: po przekierowaniu pierwsze gniazdo wraca do puli', { skip: SKIP }, async (t) => {
+test('klient https: po przekierowaniu pierwsze gniazdo wraca do puli', { skip: SKIP, timeout: 8000 }, async (t) => {
   const server = await serve(t, (req, res) => {
     if (req.url === '/final') return res.end('koniec');
     res.statusCode = 302;
@@ -530,7 +648,7 @@ test('klient https: po przekierowaniu pierwsze gniazdo wraca do puli', { skip: S
   assert.equal(busySockets(server.port), 0, 'gniazdo przekierowania nie zostalo zwolnione');
 });
 
-test('klient https: po statusie innym niz 200 gniazdo wraca do puli', { skip: SKIP }, async (t) => {
+test('klient https: po statusie innym niz 200 gniazdo wraca do puli', { skip: SKIP, timeout: 8000 }, async (t) => {
   const server = await serve(t, (req, res) => { res.statusCode = 404; res.end('brak'); }, { timeoutMs: 20000 });
   await assert.rejects(server.fetch(`${server.base}/x`), /status 404/);
   await settle();
