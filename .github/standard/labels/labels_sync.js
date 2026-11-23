@@ -339,14 +339,25 @@ function probeWrite(client, manifest, live) {
 }
 
 function execute(client, p, out) {
+  const done = [];
+  // Awaria samej diagnostyki (log) nie może zmienić wyniku zapisu ani zasłonić błędu operacji.
+  const note = (line) => {
+    try {
+      out.log(line);
+    } catch {
+      // celowo pusto: wynik wynika z operacji, nie z logu
+    }
+  };
   for (const op of operations(p, client)) {
     try {
       op.run();
     } catch (error) {
-      out.log(`- ${op.text}: BŁĄD`);
-      throw new LabelsError(`${op.text}: ${error.message}; dalsze operacje (w tym usunięcia) wstrzymane, ponowny bieg planuje od nowa`);
+      note(`- ${op.text}: BŁĄD`);
+      const executed = done.length ? `; wykonane przed błędem: ${done.join(', ')}` : '';
+      throw new LabelsError(`${op.text}: ${error.message}; dalsze operacje (w tym usunięcia) wstrzymane, ponowny bieg planuje od nowa${executed}`);
     }
-    out.log(`- ${op.text}: ok`);
+    done.push(op.text);
+    note(`- ${op.text}: ok`);
   }
 }
 

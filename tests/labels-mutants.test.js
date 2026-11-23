@@ -217,3 +217,40 @@ test('wywołanie jako skrypt: check kończy się kodem 0 z raportem, zły argume
   assert.equal(bad.status, 2);
   assert.match(bad.stderr, /użycie: labels_sync\.js check \| diff \| sync/);
 });
+
+// Awaria samej diagnostyki (out.log) w trakcie zapisu nie może zasłonić wyniku pierwotnego ani listy wykonanych operacji.
+function syncWithBrokenLog(failingLine, clientOptions = {}) {
+  const core = readCore();
+  const local = syntheticLocal();
+  const live = liveFor(core, local).filter((l) => l.name !== 'area:one' && l.name !== 'area:two');
+  const client = fakeClient(live, clientOptions);
+  const err = [];
+  const code = main(['--core', 'core.json', '--local', 'local.json', 'sync'], {
+    out: { log: (line) => { if (failingLine.test(line)) throw new Error('log: dysk pelny'); } },
+    err: { error: (line) => err.push(line) },
+    env: ENV,
+    readFile: (file) => JSON.stringify(file === 'core.json' ? core : local),
+    client
+  });
+  return { code, err: err.join('\n'), client };
+}
+
+test('log rzuca po udanej operacji: zapis i kod wyjścia zależą od operacji, nie od logu', () => {
+  const { code, client } = syncWithBrokenLog(/: ok$/);
+  assert.equal(code, 0);
+  assert.deepEqual(client.calls.filter((c) => c.startsWith('create:')), ['create:area:one', 'create:area:two']);
+});
+
+test('log rzuca przy zapisie błędu operacji: w komunikacie zostaje pierwotny błąd, lista wykonanych operacji i brak usunięć', () => {
+  const { code, err, client } = syncWithBrokenLog(/: (ok|BŁĄD)$/, { failOn: ['create:area:two'] });
+  assert.equal(code, 2);
+  assert.match(err, /create area:two: atrapa: create area:two odrzucone \(429\)/);
+  assert.match(err, /wykonane przed błędem: create area:one$/);
+  assert.ok(!client.calls.some((c) => c.startsWith('delete:')));
+});
+
+test('błąd operacji bez wykonanych wcześniej operacji nie dopisuje listy wykonanych', () => {
+  const { err } = syncWithBrokenLog(/: BŁĄD$/, { failOn: ['create:area:one'] });
+  assert.doesNotMatch(err, /wykonane przed błędem/);
+  assert.match(err, /\(429\)/);
+});
