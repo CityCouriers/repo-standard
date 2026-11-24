@@ -6,7 +6,7 @@
       "path": ".github/standard/standard_sync.js",
       "kind": "exact",
       "critical": true,
-      "sha256": "41a2399a903bb3459c5b03518d5da9ab93b54e2a1fae321b286cd024da16c757"
+      "sha256": "7711fb3b60ff7daef212b793cc7148072842c36a13063934ba1e295382502ca0"
     },
     {
       "path": ".github/standard/common/params.js",
@@ -97,6 +97,36 @@
       "kind": "exact",
       "critical": true,
       "sha256": "9d7d0b917ca8d27f8948bf635e4a859677722859ff3784e8b19dc0f01353ea58"
+    },
+    {
+      "path": ".github/standard/drift/commit_status.js",
+      "kind": "exact",
+      "critical": true,
+      "sha256": "fe1ac26bd23739dd4b05ee1ca209327e2c56c71bf372e18f945f90a3b3e83acd"
+    },
+    {
+      "path": ".github/standard/drift/drift_api.js",
+      "kind": "exact",
+      "critical": true,
+      "sha256": "0df74c39c982148219eb3f979ca3ab6591fc7bdc8d7b173485a0582eeb731f04"
+    },
+    {
+      "path": ".github/standard/drift/drift_core.js",
+      "kind": "exact",
+      "critical": true,
+      "sha256": "d49ef3ec05e847c5e12bd7ad11e6718a8020ac7ec433c00cf48132bc96aaaeff"
+    },
+    {
+      "path": ".github/standard/drift/drift_run.js",
+      "kind": "exact",
+      "critical": true,
+      "sha256": "8ba4b33eb6b853a8c59aea71cddfd6c6cb55bae17c6d2fe621f7858d644e8155"
+    },
+    {
+      "path": ".github/workflows/standard-drift.yml",
+      "kind": "exact",
+      "critical": true,
+      "sha256": "931e8d3bb90f205eae51b549df8b70358685fa0f50c7cdc0b2874dc6ff2fa028"
     },
     {
       "path": ".github/repo-standard.json",

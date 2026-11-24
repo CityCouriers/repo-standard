@@ -589,11 +589,23 @@ async function runCheck(args, env, deps) {
   if (paramsData === null) throw new SyncError(`brak pliku parametrów ${params.PARAMS_PATH}`);
   const consumerParams = loadConsumerParams(paramsData);
   const pin = consumerParams.standard;
+  const { findings, notes } = await evaluateConsumer(root, consumerParams, pin, { verify: args['verify-overrides'], env }, deps);
+  report(`standard_sync check (${pin.version}): ${findings.length ? 'rozjazd' : 'zgodne'}`,
+    [...findings, ...notes, ...(findings.length ? [] : ['pliki zgodne z manifestem'])], env);
+  return findings.length ? 1 : 0;
+}
+
+/**
+ * Ocena konsumenta względem wzorca o wersji `pin` ({ version, sha }): { findings, notes, manifest }. Wspólna dla
+ * `check` i kontroli rozjazdu. `verify` włącza sprawdzenie stanu odstępstw przez API (wymaga GITHUB_REPOSITORY
+ * i GITHUB_TOKEN w `env`); błąd API to wyjątek (nic nie jest uznane).
+ */
+async function evaluateConsumer(root, consumerParams, pin, { verify, env }, deps) {
   const manifest = await fetchManifest(deps.endpoints, STANDARD_REPO, pin.sha, deps.fetch);
   const findings = [];
   if (manifest.version !== pin.version) findings.push(`manifest po SHA ${pin.sha.slice(0, 12)} to ${manifest.version}, a plik parametrów mówi ${pin.version}`);
   let verified;
-  if (args['verify-overrides']) {
+  if (verify) {
     const repo = env.GITHUB_REPOSITORY;
     if (!repo || !env.GITHUB_TOKEN) throw new SyncError('--verify-overrides wymaga zmiennych GITHUB_REPOSITORY i GITHUB_TOKEN');
     const { active } = params.overrideFindings(manifest, consumerParams.overrides, deps.todayMs);
@@ -602,9 +614,7 @@ async function runCheck(args, env, deps) {
   }
   const result = checkConsumer(manifest, root, consumerParams, deps.todayMs, verified);
   findings.push(...result.findings);
-  report(`standard_sync check (${pin.version}): ${findings.length ? 'rozjazd' : 'zgodne'}`,
-    [...findings, ...result.notes, ...(findings.length ? [] : ['pliki zgodne z manifestem'])], env);
-  return findings.length ? 1 : 0;
+  return { findings, notes: result.notes, manifest };
 }
 
 function report(title, lines, env) {
@@ -658,7 +668,8 @@ async function main(argv, env = process.env, deps = {}) {
 module.exports = {
   STANDARD_REPO, MANIFEST_PATH, DEFAULT_ENDPOINTS, SyncError,
   sha256, dumpJson, textOf, blockOf, replaceBlock, parseManifest, manifestErrors, readPlainFile,
-  checkSelf, checkConsumer, makeHttpGet, rawUrl, resolveTag, assertPlainPath, writeAtomic, applyWrites, main,
+  checkSelf, checkConsumer, evaluateConsumer, loadConsumerParams, fetchManifest, makeHttpGet, rawUrl, resolveTag,
+  assertPlainPath, writeAtomic, applyWrites, todayUtcMs, main,
 };
 
 if (require.main === module) {
