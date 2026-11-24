@@ -13,5 +13,6 @@
     }
   },
   "review_gate": { "protected_paths": [] },
+  "drift": { "strict": false },
   "overrides": []
 }

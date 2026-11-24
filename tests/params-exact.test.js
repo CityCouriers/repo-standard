@@ -19,6 +19,7 @@ const base = () => ({
     required: { pull_request: ['tests'], push: [], workflow_dispatch: ['privacy'] },
   },
   review_gate: { protected_paths: ['a/b', 'c'] },
+  drift: { strict: true },
   overrides: [],
 });
 const errorsFor = (change) => {
@@ -37,13 +38,13 @@ test('korzeń: nie-obiekt, brakujące i nieznane klucze, schema', () => {
   for (const value of [null, [], 'x', 1, undefined, true]) {
     assert.deepEqual(params.validate(value), ['plik parametrów: oczekiwano obiektu JSON']);
   }
-  assert.deepEqual(params.validate({}), ['schema', 'standard', 'audit', 'triage', 'quality_gate', 'review_gate', 'overrides'].map((key) => `brak klucza '${key}'`));
+  assert.deepEqual(params.validate({}), ['schema', 'standard', 'audit', 'triage', 'quality_gate', 'review_gate', 'drift', 'overrides'].map((key) => `brak klucza '${key}'`));
   assert.deepEqual(errorsFor((value) => { value.zzz = 1; }), ["nieznany klucz 'zzz'"]);
   assert.deepEqual(errorsFor((value) => { value.zzz = 1; delete value.overrides; }), ["nieznany klucz 'zzz'", "brak klucza 'overrides'"]);
   assert.deepEqual(errorsFor((value) => { value.schema = 2; }), ['schema: oczekiwano 1, jest 2']);
   assert.deepEqual(errorsFor((value) => { value.schema = '1'; }), ['schema: oczekiwano 1, jest "1"']);
   assert.deepEqual(errorsFor((value) => { delete value.schema; }), ["brak klucza 'schema'"]);
-  for (const key of ['standard', 'audit', 'triage', 'quality_gate', 'review_gate', 'overrides']) {
+  for (const key of ['standard', 'audit', 'triage', 'quality_gate', 'review_gate', 'drift', 'overrides']) {
     assert.deepEqual(errorsFor((value) => { delete value[key]; }), [`brak klucza '${key}'`], key);
   }
 });
@@ -262,7 +263,8 @@ const manifest = {
 };
 const TODAY = Date.UTC(2026, 10, 11);
 const DAY = 86400000;
-const findings = (list) => params.overrideFindings(manifest, list, TODAY);
+const findingsFull = (list) => params.overrideFindings(manifest, list, TODAY);
+const findings = (list) => { const { errors, notes } = findingsFull(list); return { errors, notes }; };
 
 test('overrideFindings: komunikaty, brzegi dat i notatka niezweryfikowania', () => {
   assert.deepEqual(findings([]), { errors: [], notes: [] });
@@ -285,12 +287,12 @@ test('overrideFindings: komunikaty, brzegi dat i notatka niezweryfikowania', () 
 
 test('validateWithManifest: błędy schematu mają pierwszeństwo, notatki tylko przy poprawnym pliku', () => {
   const broken = { ...base(), schema: 2, overrides: 'nie-lista' };
-  assert.deepEqual(params.validateWithManifest(broken, manifest, TODAY), { errors: ['schema: oczekiwano 1, jest 2', 'overrides: oczekiwano listy'], notes: [] });
-  assert.deepEqual(params.validateWithManifest(base(), manifest, TODAY), { errors: [], notes: [] });
+  assert.deepEqual(params.validateWithManifest(broken, manifest, TODAY), { errors: ['schema: oczekiwano 1, jest 2', 'overrides: oczekiwano listy'], notes: [], active: [] });
+  assert.deepEqual(params.validateWithManifest(base(), manifest, TODAY), { errors: [], notes: [], active: [] });
   const withOverride = { ...base(), overrides: [override()] };
-  assert.deepEqual(params.validateWithManifest(withOverride, manifest, TODAY), { errors: [], notes: [`odstępstwo a/open.yml: ${params.UNVERIFIED_NOTE}, nie jest uznane`] });
+  assert.deepEqual(params.validateWithManifest(withOverride, manifest, TODAY), { errors: [], notes: [`odstępstwo a/open.yml: ${params.UNVERIFIED_NOTE}, nie jest uznane`], active: [override()] });
   const unknown = { ...base(), overrides: [override({ path: 'a/other.yml' })] };
-  assert.deepEqual(params.validateWithManifest(unknown, manifest, TODAY), { errors: ['odstępstwo dla pliku spoza manifestu: a/other.yml'], notes: [] });
+  assert.deepEqual(params.validateWithManifest(unknown, manifest, TODAY), { errors: ['odstępstwo dla pliku spoza manifestu: a/other.yml'], notes: [], active: [] });
 });
 
 const parse = params.parseJsonObject;
@@ -373,4 +375,23 @@ test('load: zły JSON, błędy schematu i poprawny plik', () => {
     error.message === "nieznany klucz 'zzz'; schema: oczekiwano 1, jest 2");
   assert.deepEqual(params.load(JSON.stringify(base())), base());
   assert.throws(() => params.load('[]'), (error) => error.message === 'plik parametrów: oczekiwano obiektu JSON');
+});
+
+test('drift: obiekt, klucze i wartość logiczna strict', () => {
+  const set = (change) => errorsFor((value) => { value.drift = change; });
+  assert.deepEqual(set({ strict: false }), []);
+  assert.deepEqual(set({ strict: true }), []);
+  for (const value of ['x', null, [], 5]) assert.deepEqual(set(value), ['drift: oczekiwano obiektu']);
+  assert.deepEqual(set({}), ["drift: brak klucza 'strict'"]);
+  assert.deepEqual(set({ strict: true, z: 1 }), ["drift: nieznany klucz 'z'"]);
+  const message = 'drift.strict: oczekiwano wartości true albo false';
+  for (const value of ['true', 0, 1, null, [], {}]) assert.deepEqual(set({ strict: value }), [message], JSON.stringify(value));
+});
+
+test('overrideFindings: active zawiera tylko poprawne, niewygasłe odstępstwa (nie jest uznaniem)', () => {
+  const good = override({ until: '2026-12-01' });
+  assert.deepEqual(findingsFull([]).active, []);
+  assert.deepEqual(findingsFull([good]).active, [good]);
+  assert.deepEqual(findingsFull([override({ until: '2026-11-10' })]).active, []);
+  assert.deepEqual(findingsFull([override({ path: 'a/locked.yml' }), good]).active, [good]);
 });

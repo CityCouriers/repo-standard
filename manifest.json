@@ -6,13 +6,19 @@
       "path": ".github/standard/standard_sync.js",
       "kind": "exact",
       "critical": true,
-      "sha256": "a6d5d45bf455af45d0843f0adc5f7b891838ffd8156db363b701306aa791daa2"
+      "sha256": "41a2399a903bb3459c5b03518d5da9ab93b54e2a1fae321b286cd024da16c757"
     },
     {
       "path": ".github/standard/common/params.js",
       "kind": "exact",
       "critical": true,
-      "sha256": "2918581f972d997e8aeeda5990e308b19ac6a6c56e094bd7c059ee0f40cbd81f"
+      "sha256": "332bee736d2dc051a7a0143ef5d3961d060ea738b1441d854b6d9472aa23bf9b"
+    },
+    {
+      "path": ".github/standard/common/overrides_api.js",
+      "kind": "exact",
+      "critical": true,
+      "sha256": "35be8336401aff646f953ed296ae26d1f798da651fba8a22ecca706fb36ea6aa"
     },
     {
       "path": "scripts/ci/privacy-scan.sh",

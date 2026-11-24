@@ -108,6 +108,7 @@ function validParams(overrides = []) {
     triage: { active_since: '' },
     quality_gate: { workflow: 'quality.yml', jobs: ['tests'], required: { pull_request: ['tests'], push: ['tests'], workflow_dispatch: ['tests'] } },
     review_gate: { protected_paths: [] },
+    drift: { strict: false },
     overrides,
   };
 }

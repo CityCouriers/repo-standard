@@ -261,7 +261,7 @@ test('checkSelf: plik parametrów wzorca (UTF-8, JSON, schemat, odstępstwa)', (
     notes: [],
   });
   const valid = { schema: 1, standard: { version: 'v1.0.0', sha: SHA }, audit: { active_since: '' }, triage: { active_since: '' },
-    quality_gate: { workflow: 'q.yml', jobs: ['t'], required: { pull_request: ['t'], push: ['t'], workflow_dispatch: ['t'] } }, review_gate: { protected_paths: [] },
+    quality_gate: { workflow: 'q.yml', jobs: ['t'], required: { pull_request: ['t'], push: ['t'], workflow_dispatch: ['t'] } }, review_gate: { protected_paths: [] }, drift: { strict: false },
     overrides: [{ path: 'a/open.yml', reason: 'powod', until: '2026-12-01', issue: `o/r${String.fromCharCode(35)}1` }] };
   h.writeFile(root, params.PARAMS_PATH, JSON.stringify(valid));
   assert.deepEqual(sync.checkSelf(manifest, root, TODAY), {

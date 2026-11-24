@@ -16,7 +16,7 @@ Repozytorium wzorca nie konsumuje własnego wydania. W `.github/repo-standard.js
 
 1. Wzorzec jest wydawany z tagiem (`v1.0.0`, `v1.1.0`, ...). Wydanie zawiera `manifest.json`: ścieżkę, rodzaj i sumę SHA-256 każdego pliku.
 2. Repozytorium-konsument kopiuje pliki wydania skryptem `standard_sync.js apply`. Skrypt pobiera manifest i pliki z tego publicznego repozytorium po pełnym SHA commita wydania, bez tokenu, i zapisuje wersję oraz SHA w pliku parametrów konsumenta.
-3. Workflow `standard-drift.yml` (też kopiowany) biegnie w soboty, przy PR zmieniającym `.github/**` i ręcznie. Porównuje pliki z manifestem wersji z pliku parametrów, sprawdza wygasłe odstępstwa i czy jest nowsze wydanie. Przy PR i przy uruchomieniu ręcznym jest czerwony przy rozjeździe; w sobotę zakłada albo aktualizuje jedno zgłoszenie „Rozjazd wzorca” z etykietami poza zakresem bramki audytu (`P3`, `T1`, `area:process`).
+3. Workflow `standard-drift.yml` (też kopiowany; powstaje w kolejnym PR tego samego zgłoszenia) biegnie w soboty, przy każdym PR do domyślnej gałęzi (bez filtra ścieżek), po `push` na domyślną gałąź i ręcznie. Porównuje pliki z manifestem wersji z pliku parametrów i sprawdza odstępstwa (sekcja „Odstępstwa”). Przy PR i przy uruchomieniu ręcznym jest czerwony przy rozjeździe; w sobotę zakłada albo aktualizuje jedno zgłoszenie „Rozjazd wzorca” z etykietami poza zakresem bramki audytu (`P3`, `T1`, `area:process`).
 4. Aktualizacja to zwykły PR w repozytorium-konsumencie, z jego własnym audytem i CI. Kontrola nie zapisuje do plików repozytorium: token `GITHUB_TOKEN` nie ma uprawnienia do zmiany plików w `.github/workflows` ([lista uprawnień](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions)), więc automatyczna synchronizacja wymagałaby dodatkowego sekretu, którego świadomie nie wprowadzamy.
 
 Przepływy wielokrotnego użytku (`workflow_call`) i, o ile plan organizacji pozwala, reguła organizacji „Require workflows” są opcjami na kolejne wersje, po pilocie.
@@ -104,9 +104,12 @@ Jedyny plik konsumenta, którego standard nigdy nie nadpisuje.
   "triage": { "active_since": "RRRR-MM-DDTGG:MM:SSZ" },
   "quality_gate": { "workflow": "quality.yml", "jobs": ["..."], "required": { "pull_request": ["..."], "push": ["..."], "workflow_dispatch": ["..."] } },
   "review_gate": { "protected_paths": ["config/protected.json"] },
+  "drift": { "strict": false },
   "overrides": [ { "path": ".github/workflows/x.yml", "reason": "...", "until": "RRRR-MM-DD", "issue": "owner/repo#nr" } ]
 }
 ```
+
+`drift.strict` mówi, czy konsument ma w rulesecie domyślnej gałęzi włączone „wymagaj aktualnej gałęzi” (`strict`). Wartość domyślna to `false` (ustawienie jest decyzją konsumenta, wzorzec go nie wymusza i nie zmienia ustawień repozytoriów). Plik parametrów jej nie egzekwuje; odczytuje ją kontrola rozjazdu, żeby wiedzieć, czy po zmianie domyślnej gałęzi musi sama przeliczyć statusy otwartych PR.
 
 Daty aktywacji leżą w pliku, w historii repozytorium, a nie w zmiennej repozytorium: zmienna zmienia się bez śladu w gicie, a data przesuwa granicę, od której obowiązuje audyt.
 
@@ -119,7 +122,7 @@ Daty aktywacji leżą w pliku, w historii repozytorium, a nie w zmiennej repozyt
 | `seed` | plik kopiowany raz; potem sprawdzany tylko kontrakt (wymagane znaczniki) |
 | `param` | plik lokalny, walidowany schematem |
 
-Pliki z flagą `critical` (skrypty i workflow bramek, kontroli rozjazdu, polityki, schemat parametrów) są zawsze `exact` i nie mogą mieć odstępstwa. Odstępstwo w `overrides` dotyczy wyłącznie plików z `overridable: true` i wymaga otwartego zgłoszenia z `audit:ok`, terminu najwyżej 90 dni i powodu. Zmiana `overrides` jest zmianą plików bramek.
+Pliki z flagą `critical` (skrypty i workflow bramek, kontroli rozjazdu, polityki, schemat parametrów) są zawsze `exact` i nie mogą mieć odstępstwa. Odstępstwo w `overrides` dotyczy wyłącznie plików z `overridable: true` i wymaga otwartego zgłoszenia z `audit:ok` w tym samym repozytorium, terminu najwyżej 90 dni i powodu (szczegóły w sekcji „Odstępstwa”). Zmiana `overrides` jest zmianą plików bramek.
 
 `manifest.json` nie ma własnego wpisu z sumą (samo-hashowanie jest niewykonalne): jego integralność wynika z przypiętego commita wydania, a `check --self` pilnuje jego schematu i kompletności wpisów. Wpis może mieć `source` (plik źródłowy szablonu, gdy różni się od ścieżki docelowej); manifest nie zawiera pól spoza schematu, w szczególności nie deklaruje własnego SHA commita.
 
@@ -129,20 +132,87 @@ Node.js (CommonJS, biblioteka standardowa, bez zależności), minimum Node 22. P
 
 ```bash
 node .github/standard/standard_sync.js check [--root .]
+node .github/standard/standard_sync.js check --verify-overrides [--root .]
 node .github/standard/standard_sync.js check --self [--root .]
 node .github/standard/standard_sync.js apply --version v1.0.0 [--sha <pełny SHA>] [--root .] [--dry-run]
 ```
 
 - `check` porównuje pliki konsumenta z manifestem wersji zapisanej w `.github/repo-standard.json` (manifest jest pobierany po przypiętym pełnym SHA).
+- `check --verify-overrides` dodatkowo sprawdza stan zgłoszeń odstępstw przez REST API GitHuba (sekcja „Odstępstwa”). Wymaga zmiennych `GITHUB_REPOSITORY` (`wlasciciel/repo`) i `GITHUB_TOKEN` (uprawnienie odczytu zgłoszeń); brak którejkolwiek to kod 2. Bez tej flagi `check` nie używa sieci poza pobraniem manifestu i żadne odstępstwo nie jest uznawane.
 - `check --self` działa w repozytorium wzorca: porównuje `manifest.json` z własnymi plikami, pilnuje schematu i kompletności wpisów (plik objęty katalogami wzorca, a niewpisany do manifestu, to rozjazd) oraz sprawdza `overrides` z lokalnego pliku parametrów, jeśli istnieje.
-- `apply --version` zamienia tag na pełny SHA commita, pobiera manifest i WSZYSTKIE pliki po tym SHA (tylko https, bez tokenu, przekierowania wyłącznie na ten sam host i https; nie ma wyjątku dla http), sprawdza w pamięci sumy SHA-256, ścieżki, schemat manifestu i zgodność wersji manifestu z tagiem. Dopiero po pełnej weryfikacji zapisuje pliki i na końcu `.github/repo-standard.json`. Błąd na dowolnym etapie pobierania lub weryfikacji oznacza zero zmian w repozytorium, także w pliku parametrów. Z `--sha` obok `--version` SHA tagu musi być równy podanemu.
+- `apply --version` zamienia tag na pełny SHA commita, pobiera manifest i WSZYSTKIE pliki po tym SHA (tylko https, bez tokenu, przekierowania wyłącznie na ten sam host i https; nie ma wyjątku dla http), sprawdza w pamięci sumy SHA-256, ścieżki, schemat manifestu i zgodność wersji manifestu z tagiem. Dopiero po pełnej weryfikacji zapisuje pliki i na końcu `.github/repo-standard.json`. Błąd na dowolnym etapie pobierania lub weryfikacji oznacza zero zmian w repozytorium, także w pliku parametrów. Pliki z odstępstwem poprawnym składniowo i niewygasłym są pomijane (patrz „Odstępstwa”). Z `--sha` obok `--version` SHA tagu musi być równy podanemu.
 - Kody wyjścia: 0 zgodne, 1 rozjazd, 2 błąd działania (sieć, zły manifest, zły plik parametrów, odmowa zapisu). Fail-closed.
 
 Bezpieczeństwo zapisów (wszystkie zapisy, także `.github/repo-standard.json`): odmowa ścieżek spoza katalogu repozytorium (`..`), ścieżek w `.git` oraz dowiązań symbolicznych w pliku docelowym i w dowolnym katalogu nadrzędnym. Zapis idzie przez plik tymczasowy w tym samym katalogu (otwarty z wykluczeniem istniejącego pliku, a na platformach, które to wspierają, także dowiązania) i `rename`, po ponownej kontroli ścieżki bezpośrednio przed zapisem. Zostaje wąskie okno wyścigu między ostatnią kontrolą a `rename`, którego bez wsparcia systemu plików nie da się zamknąć; dlatego skrypt jest przeznaczony do repozytorium, w którym nikt inny nie zmienia struktury katalogów w trakcie działania.
 
 Awaria w trakcie wielu zapisów: przed zapisem skrypt zapamiętuje poprzednią treść każdego pliku i przy błędzie przywraca je w odwrotnej kolejności. Wynik jest jawny: komunikat „częściowa awaria zapisu” z listą plików zapisanych, przywróconych i nieprzywróconych (kod 2). Gdy przywrócenie samo zawiedzie, lista wskazuje pliki do ręcznej naprawy z `git checkout`.
 
-Odstępstwa (`overrides`): B1 sprawdza wyłącznie składnię (plik z manifestu z `overridable: true`, nigdy `critical`; zgłoszenie w postaci `wlasciciel/repo#nr`; termin najwyżej 90 dni; powód). Stanu zgłoszenia (otwarte, `audit:ok`) B1 NIE sprawdza: wynik brzmi „składnia poprawna, stan zgłoszenia niezweryfikowany”, a odstępstwo nie jest uznawane za zatwierdzone, więc nie wyłącza kontroli pliku i `apply` go nie pomija. Uznanie odstępstwa wprowadzi dopiero zaufana bramka w kolejnym zgłoszeniu.
+## Odstępstwa (`overrides`)
+
+Odstępstwo pozwala plikowi konsumenta odbiegać od wzorca przez ograniczony czas, gdy konsument czeka na poprawkę we wzorcu (sekcja „Poprawka znaleziona u konsumenta”). Dotyczy wyłącznie wpisów manifestu z `overridable: true`; plików `critical` nie obejmuje nigdy.
+
+**Składnia** (sprawdza każdy `check`, `check --self` i `apply`): plik z manifestu z `overridable: true` i bez `critical`; `issue` w postaci `wlasciciel/repo#nr`; `until` istniejącą datą, nie wcześniejszą niż dziś (UTC) i nie dalszą niż 90 dni; niepusty `reason`; ścieżka bez powtórzeń. Błąd składni to kod 2 w `apply` i rozjazd w `check`.
+
+**Uznanie** (tylko `check --verify-overrides`): odstępstwo jest uznane, gdy jednocześnie:
+1. składnia jest poprawna, a termin nie minął,
+2. `issue` wskazuje zgłoszenie w TYM SAMYM repozytorium co kontrolowane (`GITHUB_REPOSITORY`; `GITHUB_TOKEN` nie czyta innych prywatnych repozytoriów, a odstępstwo odsyłające gdzie indziej nie jest uznane),
+3. odpowiedź `GET /repos/{repo}/issues/{nr}` opisuje zgłoszenie, a nie PR (brak pola `pull_request`), z zgodnym numerem, stanem `open` i etykietą `audit:ok`.
+
+Uznane odstępstwo wyłącza kontrolę rozjazdu tego jednego pliku. Każde inne (brak zgłoszenia, zgłoszenie zamknięte, brak `audit:ok`, PR zamiast zgłoszenia, inne repozytorium) jest nieuznane: plik jest sprawdzany tak, jakby odstępstwa nie było, a powód trafia do raportu. Zamknięcie zgłoszenia albo utrata `audit:ok` (edycja treści zgłoszenia cofa audyt) kończy odstępstwo od następnej kontroli.
+
+**Błąd API** (sieć, limit zapytań, status inny niż 200, przekierowanie, odpowiedź niebędąca obiektem JSON, zbyt duża odpowiedź) to kod 2 i brak jakiegokolwiek uznania, nie „cicho bez odstępstwa” i nie „uznane”. Token jest wysyłany wyłącznie na `https://api.github.com`, nie jest zapisywany do raportu ani logu, a przekierowania nie są śledzone.
+
+**`apply`** pomija pliki z odstępstwem poprawnym składniowo i niewygasłym, z komunikatem „pominięto (odstępstwo ..., stan zgłoszenia zweryfikuje kontrola)”. `apply` nie używa sieci poza pobraniem wzorca, więc stanu zgłoszenia nie zna; autorytetem jest `check --verify-overrides`: pominięcie bez uznanego odstępstwa kończy się rozjazdem w kontroli, nie cichym nadpisaniem ani cichym zatwierdzeniem. Pozostałe pliki są zapisywane jak zwykle.
+
+**Odnowienie** to nowy wpis `until` (najwyżej 90 dni od dnia zmiany) w zwykłym PR; zmiana `overrides` jest zmianą plików bramek i wymaga nowego audytu zgłoszenia oraz jawnej akceptacji w werdykcie PR.
+
+## Aktualizacja wzorca w konsumencie
+
+Nowe wydanie nie zmienia konsumentów samo. Aktualizacja to zwykły PR (Draft) w konsumencie, z jego CI i audytem: `apply --version vX.Y.Z`, wynik `check` przed i po w opisie, jedno wydanie na PR; przy skoku o więcej niż jedno wydanie przejrzyj notatki wszystkich pośrednich. Cofnięcie wersji to też zwykły PR, z uzasadnieniem i jawną akceptacją w werdykcie.
+
+`GITHUB_TOKEN` nie ma uprawnienia do zmiany plików w `.github/workflows`, więc automatyczne PR-y aktualizacji wymagałyby innego mechanizmu. Rozważone opcje:
+
+| opcja | ocena |
+| --- | --- |
+| A. agent robi PR ręcznie (`apply`) | zero nowych sekretów, działa teraz; zależy od uwagi człowieka |
+| B. automat z osobistym tokenem w sekrecie | odrzucona: token osoby z prawem zapisu do workflow we wszystkich repozytoriach, związany z kontem |
+| C. aplikacja GitHub organizacji (krótkotrwały token, uprawnienia `contents`, `pull-requests`, `workflows` tylko na repozytoriach konsumentów) | odłożona do osobnego zgłoszenia po pilocie: klucz aplikacji pozwala zmieniać workflow w wielu repozytoriach (duży promień rażenia); wymaga zgody właściciela |
+| D. zgłoszenie „Rozjazd wzorca” z gotowym poleceniem `apply` | dostarcza wejście dla A bez nowych uprawnień |
+| E. reguła organizacji „Require workflows” | nie zastępuje plików (szablony, skrypty, `dependabot.yml`) i zmienia model „kopia z sumą”; poza zakresem |
+
+Obowiązuje A z D. Ewentualna opcja C: tylko PR Draft, nigdy scalanie, żadnych uprawnień do ustawień ani sekretów, a PR przechodzi ten sam audyt co zwykły.
+
+## Kolejność wdrożeń
+
+Wdrożenia idą falami; przejście do kolejnej wymaga kryteriów poprzedniej i akceptacji koordynatora.
+
+0. **Pilot** na prywatnym repozytorium próbnym, z prawdziwym zestawem reguł gałęzi (nie atrapą API) i wydaniem wstępnym. Pilot jest operacją właściciela na tym repozytorium; wymagana kontrola kontroli rozjazdu jest włączana dopiero po wynikach pilota i jako odrębna operacja właściciela. Kryteria i dowody: zgłoszenie dystrybucji.
+1. Małe repozytoria z najprostszym zestawem workflow. Kryterium: jedno pełne wydanie (adopcja i jedna aktualizacja) bez ręcznych napraw skryptu.
+2. Repozytoria z istniejącą bramką audytu i `review-gate`. Kryterium: różnice behawioralne starych kopii rozstrzygnięte (poprawka do wzorca albo odstępstwo z terminem), zero odstępstw bez zgłoszenia.
+3. Największe repozytorium produktowe, po fali 2 i po rozstrzygnięciu różnic w etykietach.
+
+Repozytorium, którego domyślna gałąź nie jest `main`, albo będące rozwidleniem cudzego projektu, dostaje osobną ocenę przed adopcją. Nowy fałszywy alarm „czerwone bez realnego rozjazdu” wstrzymuje kolejne adopcje do poprawki wzorca.
+
+## Poprawka znaleziona u konsumenta
+
+Plik wzorca w konsumencie jest `exact`: lokalna łata to rozjazd, więc cichej lokalnej poprawki nie ma.
+
+1. Błąd albo lepsze zachowanie zgłaszasz jako zgłoszenie w TYM repozytorium (element, wersja wzorca, odtworzenie, proponowana zmiana, wpływ na inne repozytoria), bez prywatnych danych: opisujesz zachowanie, bez odnośników do prywatnych zasobów. Dalej zwykły audyt zgłoszenia i PR.
+2. Gdy konsument czeka na wydanie: odstępstwo na plik `overridable` z terminem możliwie krótkim i własnym zgłoszeniem w konsumencie, które w treści wskazuje zgłoszenie wzorca (odsyłacz tekstowy; pole `issue` musi wskazywać zgłoszenie konsumenta).
+3. Po wydaniu z poprawką: aktualizacja, usunięcie odstępstwa i zamknięcie zgłoszenia konsumenta w tym samym PR.
+4. Poprawka w pliku `critical` nigdy nie ma odstępstwa; blokada konsumenta oznacza wydanie poprawkowe.
+
+## Różnice między repozytoriami
+
+| różnica | mechanizm | przykład |
+| --- | --- | --- |
+| dane (lista, wartość, data) | parametr w `.github/repo-standard.json` albo plik `param` | daty aktywacji audytu i triage, lista jobów strażnika |
+| dopisywane przez konsumenta do wspólnego pliku | rodzaj `block` | inne ekosystemy w `dependabot.yml` |
+| punkt wyjścia, potem swoje | rodzaj `seed` z kontraktem | szablony treści, kategorie szkiców wydań |
+| zachowanie lepsze u konsumenta | zgłoszenie do wzorca, do wydania ewentualnie odstępstwo | lepszy sposób ustalania autora |
+| zachowanie naprawdę specyficzne | workflow lokalny o nazwie innej niż pliki wzorca, poza manifestem | budowa wydań produktu, wdrożenia |
+
+Nowy parametr to zmiana schematu pliku parametrów (`critical`) i wymaga wydania. Workflow lokalny nie nosi nazwy pliku z manifestu.
 
 ### Testy
 
@@ -250,10 +320,12 @@ Każdy workflow wyzwalany przez `pull_request` albo `pull_request_target` ma `ru
 ## Adopcja (po wydaniu `v1.0.0`)
 
 1. Skopiuj wydanie: raz pobierz ręcznie `.github/standard/standard_sync.js` i `.github/standard/common/params.js` z wydania po pełnym SHA commita (sprawdź sumy z `manifest.json`), a potem uruchom `node .github/standard/standard_sync.js apply --version v1.0.0`; skrypt zastąpi te pliki zweryfikowanymi.
-2. Uzupełnij `.github/repo-standard.json` (daty aktywacji, listy jobów strażnika, dodatkowe ścieżki bramki przeglądu).
-3. Dopisz do ochrony domyślnej gałęzi wymagane kontrole `quality-gate`, `review-gate` i `secret-scan`.
+2. Uzupełnij `.github/repo-standard.json` (daty aktywacji, listy jobów strażnika, dodatkowe ścieżki bramki przeglądu, `drift.strict`).
+3. Dopisz do ochrony domyślnej gałęzi wymagane kontrole `quality-gate`, `review-gate` i `secret-scan`. Kontrolę `standard-drift` dopisujesz jako wymaganą dopiero po wynikach pilota i na osobną decyzję właściciela; do tego czasu jest informacyjna.
 4. Włącz `standard-drift.yml` i sprawdź, że kontrola jest zielona na czystej kopii.
 5. Dodaj do konsumenta `.gitattributes` z wpisem `* text=auto eol=lf` (jak tutaj); bez niego checkout z końcami CRLF na Windows zepsuje sumy `exact`.
+
+Adopcję wykonuje jedna sesja agenta na jedno repozytorium, na zlecenie koordynatora, w jednym PR (Draft) „Adopcja wzorca vX.Y.Z”, z własnym audytem konsumenta. Jeśli konsument miał wcześniej własną kopię elementu, PR usuwa ją i opisuje różnice zachowania (było/jest); lepsze zachowanie starej kopii to zgłoszenie do wzorca, nie lokalna łata. Zmiany ustawień ochrony gałęzi wykonuje właściciel, PR je tylko opisuje. W opisie PR: `check` kod 0 na czystym checkoucie i, dla repozytorium publicznego, wynik skanu prywatności z liczbą trafień.
 
 ## Zasady tego repozytorium
 

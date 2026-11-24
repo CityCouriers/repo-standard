@@ -9,7 +9,7 @@
 
 const PARAMS_PATH = '.github/repo-standard.json';
 const SCHEMA = 1;
-const TOP_KEYS = ['schema', 'standard', 'audit', 'triage', 'quality_gate', 'review_gate', 'overrides'];
+const TOP_KEYS = ['schema', 'standard', 'audit', 'triage', 'quality_gate', 'review_gate', 'drift', 'overrides'];
 const VERSION = /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 const FULL_SHA = /^[0-9a-f]{40}$/;
 // Wzorce dat wyłącznie wyciągają składniki; kształt całego napisu rozstrzyga porównanie z zapisem odtworzonym z `Date`.
@@ -121,6 +121,12 @@ function reviewGateErrors(value) {
   return [];
 }
 
+function driftErrors(value) {
+  const errors = objectErrors('drift', value, ['strict']);
+  if (errors.length) return errors;
+  return typeof value.strict === 'boolean' ? [] : ['drift.strict: oczekiwano wartości true albo false'];
+}
+
 function overrideErrors(index, entry) {
   const where = `overrides[${index}]`;
   const errors = objectErrors(where, entry, OVERRIDE_KEYS);
@@ -146,6 +152,7 @@ function validate(params) {
     ['triage', (value) => activationErrors('triage', value)],
     ['quality_gate', qualityGateErrors],
     ['review_gate', reviewGateErrors],
+    ['drift', driftErrors],
   ];
   for (const [key, check] of checks) if (has(params, key)) errors.push(...check(params[key]));
   if (has(params, 'overrides')) {
@@ -164,13 +171,15 @@ function validate(params) {
 
 /**
  * Odstępstwa względem manifestu: tylko składnia i zgodność z flagami wpisu, bez sprawdzania zgłoszenia.
- * Zwraca { errors, notes }. Poprawne odstępstwo daje wyłącznie notatkę UNVERIFIED_NOTE; nie jest ono uznane
- * (wywołujący nie może pomijać kontroli pliku na jego podstawie).
+ * Zwraca { errors, notes, active }. Poprawne odstępstwo daje notatkę UNVERIFIED_NOTE i trafia do `active`
+ * (składnia poprawna, termin nie minął). Samo `active` NIE jest uznaniem: uznanie wymaga weryfikacji stanu
+ * zgłoszenia (`overrides_api.js`), a `apply` używa `active` wyłącznie do pominięcia zapisu pliku.
  */
 function overrideFindings(manifest, overrides, todayMs) {
   const entries = new Map(manifest.files.map((entry) => [entry.path, entry]));
   const errors = [];
   const notes = [];
+  const active = [];
   for (const override of overrides) {
     const entry = entries.get(override.path);
     if (!entry) {
@@ -183,16 +192,19 @@ function overrideFindings(manifest, overrides, todayMs) {
       const until = dateMs(override.until);
       if (until < todayMs) errors.push(`odstępstwo wygasło ${override.until}: ${override.path}`);
       else if ((until - todayMs) / DAY_MS > OVERRIDE_MAX_DAYS) errors.push(`odstępstwo z terminem dalszym niż ${OVERRIDE_MAX_DAYS} dni: ${override.path}`);
-      else notes.push(`odstępstwo ${override.path}: ${UNVERIFIED_NOTE}, nie jest uznane`);
+      else {
+        notes.push(`odstępstwo ${override.path}: ${UNVERIFIED_NOTE}, nie jest uznane`);
+        active.push(override);
+      }
     }
   }
-  return { errors, notes };
+  return { errors, notes, active };
 }
 
 /** Pełna walidacja lokalna: schemat plus odstępstwa względem manifestu. Zwraca { errors, notes }. */
 function validateWithManifest(params, manifest, todayMs) {
   const errors = validate(params);
-  if (errors.length) return { errors, notes: [] };
+  if (errors.length) return { errors, notes: [], active: [] };
   return overrideFindings(manifest, params.overrides, todayMs);
 }
 
