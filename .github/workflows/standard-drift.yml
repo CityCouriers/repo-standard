@@ -1,0 +1,132 @@
+name: Standard drift
+
+# Kontrola rozjazdu plików wzorca repo-standard (element wzorca, kopiowany bez zmian). Kod z domyślnej gałęzi;
+# HEAD PR jest wyłącznie danymi (czytany przez REST, nic stamtąd nie jest wykonywane). Logika i testy żyją w
+# `.github/standard/drift/`; opis, granice gwarancji i pilot: README, sekcja „Kontrola rozjazdu".
+#
+# Wynik dla PR to jawny commit status `standard-drift` na HEAD PR (nie natywny check). Joby mają inne nazwy niż ten
+# kontekst: status i check o tej samej nazwie musiałyby przejść oba. Do wyniku pilota kontekst jest informacyjny.
+# Wszystkie wartości ze zdarzenia idą przez `env`, bez interpolacji do `run:`.
+
+on:
+  schedule:
+    - cron: '17 6 * * 6'
+  workflow_dispatch:
+  push:
+    branches: [main]
+  # Bez filtra ścieżek: wymagana kontrola pominięta przez filtr wisiałaby jako oczekująca. Oszczędność minut daje
+  # wczesne wyjście w skrypcie (PR niedotykający plików wzorca dostaje `success`).
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]  # edited: zmiana gałęzi bazowej PR
+
+permissions: {}
+
+concurrency:
+  group: standard-drift-${{ github.event_name }}-${{ github.event.pull_request.number || 'none' }}
+  cancel-in-progress: false
+
+jobs:
+  drift-pr:
+    name: drift-pr
+    if: github.event_name == 'pull_request_target' && (github.event.action != 'edited' || github.event.changes.base != null)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read  # odczyt plików HEAD PR jako danych
+      issues: read  # stan zgłoszeń odstępstw
+      pull-requests: read  # HEAD i lista plików PR
+      statuses: write  # jedyny zapis: commit status `standard-drift`
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Checkout (domyślna gałąź, kod kontroli)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Kontrola PR i status
+        run: node .github/standard/drift/drift_run.js pr
+
+  drift-push:
+    name: drift-push
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: read  # stan zgłoszeń odstępstw
+      pull-requests: read
+      statuses: write  # reconciler: pending, potem wynik na HEAD otwartych PR
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Reconciler statusów i kontrola gałęzi
+        run: node .github/standard/drift/drift_run.js push
+
+  drift-check:
+    name: drift-check
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read  # stan zgłoszeń odstępstw
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Kontrola gałęzi
+        run: node .github/standard/drift/drift_run.js check
+
+  drift-issue:
+    name: drift-issue
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read  # tylko checkout kodu kontroli
+      issues: write  # jedno zgłoszenie „Rozjazd wzorca"; poza tym brak zapisów
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Zgłoszenie rozjazdu
+        run: node .github/standard/drift/drift_run.js issue

@@ -1,6 +1,6 @@
 # repo-standard
 
-> **Status: wersja wstępna, przed wydaniem `v1.0.0`.** Działa synchronizator `standard_sync.js` (`check`, `check --self`, `apply`), walidator pliku parametrów, manifest i CI tego repozytorium (testy, skan prywatności, skan sekretów). Działa też bramka audytu zgłoszeń z triage (workflow `issue-audit.yml`, opis w sekcji „Bramka audytu zgłoszeń”), w tym repozytorium: zgłoszenia tego repozytorium są audytowane tą bramką. Pozostałe elementy z tabeli poniżej (`review-gate`, `standard-drift` i inne) powstają w kolejnych zgłoszeniach. Do wydania `v1.0.0` niczego stąd nie wolno kopiować do produkcyjnych repozytoriów.
+> **Status: wersja wstępna, przed wydaniem `v1.0.0`.** Działa synchronizator `standard_sync.js` (`check`, `check --self`, `apply`), walidator pliku parametrów, manifest i CI tego repozytorium (testy, skan prywatności, skan sekretów). Działa też bramka audytu zgłoszeń z triage (workflow `issue-audit.yml`, opis w sekcji „Bramka audytu zgłoszeń”), w tym repozytorium: zgłoszenia tego repozytorium są audytowane tą bramką. Działa też kontrola rozjazdu (workflow `standard-drift.yml`, sekcja „Kontrola rozjazdu”); jej pilot na prawdziwym zestawie reguł gałęzi jeszcze się nie odbył, więc u konsumentów jest informacyjna. Pozostałe elementy z tabeli poniżej (`review-gate` i inne) powstają w kolejnych zgłoszeniach. Do wydania `v1.0.0` niczego stąd nie wolno kopiować do produkcyjnych repozytoriów.
 
 Docelowo: wspólne przepływy GitHub Actions, skrypty bramek i szablony dla repozytoriów CityCouriers. Każdy element ma mieć jedną wersję wzorcową, a repozytorium, które go używa, kopiuje ją bez zmian i trzyma jeden mały plik parametrów. Rozjazd kopii od wzorca ma wykrywać automat.
 
@@ -16,7 +16,7 @@ Repozytorium wzorca nie konsumuje własnego wydania. W `.github/repo-standard.js
 
 1. Wzorzec jest wydawany z tagiem (`v1.0.0`, `v1.1.0`, ...). Wydanie zawiera `manifest.json`: ścieżkę, rodzaj i sumę SHA-256 każdego pliku.
 2. Repozytorium-konsument kopiuje pliki wydania skryptem `standard_sync.js apply`. Skrypt pobiera manifest i pliki z tego publicznego repozytorium po pełnym SHA commita wydania, bez tokenu, i zapisuje wersję oraz SHA w pliku parametrów konsumenta.
-3. Workflow `standard-drift.yml` (też kopiowany; powstaje w kolejnym PR tego samego zgłoszenia) biegnie w soboty, przy każdym PR do domyślnej gałęzi (bez filtra ścieżek), po `push` na domyślną gałąź i ręcznie. Porównuje pliki z manifestem wersji z pliku parametrów i sprawdza odstępstwa (sekcja „Odstępstwa”). Przy PR i przy uruchomieniu ręcznym jest czerwony przy rozjeździe; w sobotę zakłada albo aktualizuje jedno zgłoszenie „Rozjazd wzorca” z etykietami poza zakresem bramki audytu (`P3`, `T1`, `area:process`).
+3. Workflow `standard-drift.yml` (też kopiowany) biegnie w soboty, przy każdym PR do domyślnej gałęzi (bez filtra ścieżek), po `push` na domyślną gałąź i ręcznie. Porównuje pliki z manifestem wersji z pliku parametrów i sprawdza odstępstwa (sekcja „Odstępstwa”). Przy PR i przy uruchomieniu ręcznym jest czerwony przy rozjeździe; w sobotę zakłada albo aktualizuje jedno zgłoszenie „Rozjazd wzorca” z etykietami poza zakresem bramki audytu (`P3`, `T1`, `area:process`).
 4. Aktualizacja to zwykły PR w repozytorium-konsumencie, z jego własnym audytem i CI. Kontrola nie zapisuje do plików repozytorium: token `GITHUB_TOKEN` nie ma uprawnienia do zmiany plików w `.github/workflows` ([lista uprawnień](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions)), więc automatyczna synchronizacja wymagałaby dodatkowego sekretu, którego świadomie nie wprowadzamy.
 
 Przepływy wielokrotnego użytku (`workflow_call`) i, o ile plan organizacji pozwala, reguła organizacji „Require workflows” są opcjami na kolejne wersje, po pilocie.
@@ -305,6 +305,56 @@ node --test "tests/labels-*.test.js"
 ```
 
 Testy używają atrapy klienta GitHub i danych syntetycznych, bez sieci i bez `gh`; testy `apply` używają lokalnego serwera https jak pozostałe testy wzorca. Pomiar mutacyjny skryptu jest wykonywany Strykerem.
+
+## Kontrola rozjazdu (`standard-drift`)
+
+Workflow `.github/workflows/standard-drift.yml` i moduły w `.github/standard/drift/` (`drift_run.js`, `drift_core.js`, `drift_api.js`, `commit_status.js`; ostatni to wspólny mechanizm commit status, wołany też przez inne kontrole wymagane na HEAD PR) to pliki `critical`, `exact`: konsument kopiuje je bez zmian i nie ma dla nich odstępstwa. Kontrola niczego nie zapisuje do plików repozytorium; jedyne zapisy to commit status na HEAD PR i jedno zgłoszenie „Rozjazd wzorca”. Do ocen używa tego samego `evaluateConsumer` co `standard_sync.js check --verify-overrides`: pobiera manifest wersji z pliku parametrów, porównuje pliki i sprawdza stan zgłoszeń odstępstw przez API (błąd API to kod 2, nigdy „brak rozjazdu”).
+
+| zdarzenie | job (nazwa) | uprawnienia | co robi |
+| --- | --- | --- | --- |
+| `pull_request_target` (każdy PR, bez filtra ścieżek) | `drift-pr` | `contents`, `issues`, `pull-requests`: read; `statuses`: write | status `standard-drift` na HEAD PR |
+| `push` na domyślną gałąź | `drift-push` | jak wyżej | reconciler statusów otwartych PR i kontrola samej gałęzi |
+| `schedule` (sobota), `workflow_dispatch` | `drift-check` | `contents`, `issues`: read | kontrola domyślnej gałęzi, czerwone przy rozjeździe |
+| `schedule` (sobota) | `drift-issue` | `contents`: read; `issues`: write | jedno zgłoszenie „Rozjazd wzorca” |
+
+Poziom workflow ma `permissions: {}`, brak sekretów, wszystkie wartości ze zdarzenia idą przez `env`, a joby mają inne nazwy niż kontekst statusu (status i check o tej samej nazwie musiałyby przejść oba, [dokumentacja](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks)). Kody wyjścia skryptu: 0 zgodne, 1 rozjazd, 2 błąd działania.
+
+### Kontrola PR i status
+
+- Kod pochodzi z domyślnej gałęzi (`pull_request_target` bierze workflow i domyślny checkout z bazy, [dokumentacja](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target)). HEAD PR jest wyłącznie danymi: pliki wzorca i plik parametrów są czytane przez REST (`contents`) do katalogu tymczasowego pod ścieżkami z zaufanego manifestu, nic stamtąd nie jest wykonywane, a nazwy plików PR służą tylko do porównania napisów. Dowiązanie, katalog, moduł albo plik zbyt duży dla API to brak pliku albo błąd działania, nigdy odczyt poza katalogiem.
+- Status jest jawny: `POST /statuses/{sha}` z kontekstem `standard-drift` na HEAD odczytany przez API w czasie biegu. Najpierw `pending`, na końcu `success` albo `failure`. Przed zapisem wyniku skrypt czyta HEAD PR jeszcze raz: gdy się zmienił, wyniku nie zapisuje (nowy commit ma własny bieg). Błąd działania zapisuje `failure`; workflow zawieszony, anulowany albo pominięty zostawia `pending` albo brak statusu, a to nie jest sukces.
+- Wczesne wyjście: PR, który nie zmienia (ani nie przenosi) pliku z manifestu ani niczego w `.github/`, dostaje `success` bez pobierania plików. Lista plików PR obcięta przez API (3000) liczy się jak dotknięcie.
+- Zaufany pin (`standard.version`, `standard.sha`) pochodzi z pliku parametrów domyślnej gałęzi. Pin z HEAD PR obowiązuje tylko wtedy, gdy wersja jest tagiem wydania w tym repozytorium, a SHA jest commitem tego tagu; wtedy wynik zawiera notatkę o zmianie wersji. Zgodę na samą zmianę wzorca wydaje werdykt audytu z linią `Wzorzec: <wersja> <pełny SHA>` (sekcja „Zaufanie do kodu bramek”). Pin nieuznany to rozjazd i sprawdzenie względem pinu bazy.
+- PR do gałęzi innej niż domyślna jest poza zakresem i nie dostaje statusu.
+
+### Zmiana domyślnej gałęzi (reconciler) i granica gwarancji
+
+Po `push` na domyślną gałąź job `drift-push` robi dwie rzeczy. Krok 1: ustawia `pending` (opis zawiera skrót SHA nowej bazy) na HEAD każdego otwartego PR do tej gałęzi, zanim cokolwiek przeliczy. Krok 2: przelicza kontrolę dla pary (HEAD PR, nowa baza) i zapisuje wynik; przelicza najwyżej 25 PR (stała `MAX_RECALC`), reszta zostaje `pending` z komunikatem w podsumowaniu przebiegu, a kolejny `push` albo ręczne uruchomienie ją domknie. Na końcu sprawdza samą domyślną gałąź: rozjazd po scaleniu czerwieni bieg. Błąd zapisu albo odczytu kończy się `pending` albo `failure`, nigdy `success`. Z `drift.strict: true` (konsument wymusza w rulesecie „wymagaj aktualnej gałęzi”) reconciler niczego nie przelicza, bo robi to GitHub.
+
+**Granica gwarancji: proces nie jest atomowy.** Przy `strict: false` wcześniejszy `success` na tym samym HEAD pozwala scalić PR w oknie między zmianą bazy a krokiem 1. Wpis SHA bazy w opisie statusu nie jest przez GitHub egzekwowany. Ryzyko okna jest przyjęte decyzją właściciela z 2026-11-15 („Tak, przyjmuję”) w wariancie z dwoma zabezpieczeniami: `pending` jako pierwszy krok i kontrola samej domyślnej gałęzi po scaleniu. Długość okna mierzy pilot. Kolejka scalania (`merge_group`) dałaby kontrolę atomową i jest tylko opisaną alternatywą.
+
+### Zgłoszenie „Rozjazd wzorca”
+
+Co sobotę job `drift-issue` utrzymuje jedno zgłoszenie. Własne zgłoszenie to otwarte, nie PR, autor `github-actions[bot]`, z etykietami `P3`, `T1`, `area:process`, `by:agent`, z `<!-- repo-standard-drift -->` w pierwszej linii (cudzy znacznik jest ignorowany). Przy rozjeździe: brak zgłoszenia, zakłada; jest, nadpisuje treść i dopisuje komentarz tylko gdy zmienił się odcisk listy różnic (stabilny rozjazd nie generuje komentarzy co tydzień). Gdy rozjazdu nie ma, zamyka zgłoszenie komentarzem „rozjazd ustał”. Więcej niż jedno otwarte to anomalia: prowadzi najstarsze i kończy się kodem 1. Błąd kontroli niczego nie zmienia (kod 2). Etykiety leżą poza zakresem bramki audytu, więc zgłoszenie nie wymaga audytu. Treść zawiera wersję, listę różnic w bloku kodu, polecenie `apply --version` i odsyłacz do sekcji „Poprawka znaleziona u konsumenta”.
+
+### Czego kontrola jeszcze nie robi
+
+- Nie ostrzega o odstępstwach wygasających w ciągu 14 dni ani nie podaje, że jest nowsze wydanie (zależy od procesu wydań); obie pozycje są odłożone do rozstrzygnięcia przed zamknięciem zgłoszenia dystrybucji.
+- Nie jest wymaganą kontrolą u żadnego konsumenta, dopóki pilot na prawdziwym zestawie reguł gałęzi nie da GO, i to jest osobna operacja właściciela. Pilot sprawdza m.in. przypisanie statusu do HEAD PR, próbę scalenia w oknie reconcilera i PR z forka (czytanie plików HEAD forka przez API bazy), czego testy na atrapie API nie dowodzą.
+- Repozytorium publiczne: dokumentacja GitHuba opisuje politykę dla `pull_request_target` w repozytoriach publicznych (stan na 2026-11-24: tryb oceny, egzekwowanie od 2026-12-02, [dokumentacja](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target)). Przed adopcją w repozytorium publicznym sprawdź jej wpływ.
+- Wymaga `gh` na runnerze (jest na `ubuntu-24.04`) i tokenu `github.token` z uprawnieniami z tabeli.
+
+### Granice zaufania (świadome decyzje projektowe)
+
+- **Baza przesunięta w trakcie biegu:** przed zapisem wyniku przebieg porównuje czubek domyślnej gałęzi z `GITHUB_SHA`. Różnica oznacza brak zapisu: status zostaje `pending`, a wynik dla nowej bazy ustawia reconciler (albo kolejny bieg). Dzięki temu spóźniony bieg nie nadpisuje `pending` ani `failure` ustawionego po zmianie bazy.
+- **Zmiana gałęzi bazowej PR:** wyzwalacz obejmuje `edited`, ale job biegnie tylko przy zmianie bazy (`changes.base`), więc PR przestawiony na domyślną gałąź dostaje status, a zwykła edycja tytułu nic nie uruchamia.
+- **Odstępstwo uznaje otwarte zgłoszenie z `audit:ok` wpisane w HEAD:** kontrola nie wiąże zgłoszenia ze ścieżką ani z PR. Zatwierdzenie zakresu odstępstwa należy do `review-gate` (zgłoszenie #7, decyzja D3); utwardzenie wiązania śledzi zgłoszenie dotyczące API odstępstw.
+- **Cofnięcie pinu do starszego wydania** jest uznawane, jeśli wersja rozwiązuje się w API wzorca do tego samego SHA (wycofanie przez zwykły PR jest kryterium pilota). Zgodność linii `Wzorzec:` sprawdza `review-gate`.
+- **Status `standard-drift` jest zwykłym commit statusem:** zapisać go może każdy z uprawnieniem `statuses: write`. To granica modelu uprawnień repozytorium, nie kontroli; wyznaczają ją ruleset i dostęp do zapisu. Po zmianie bazy poprzedni wynik na tym samym SHA obowiązuje do chwili, gdy reconciler ustawi `pending` (okno nieatomowe, przyjęte 2026-11-15).
+
+### Źródła wzorca
+
+Rozwiązania do wykrywania rozjazdu istnieją (harmonogram tygodniowy i jedno zgłoszenie ze stałym znacznikiem, aktualizowane w miejscu zamiast duplikatów), na przykład [BaseCoat: version drift](https://ivegamsft.github.io/basecoat/guides/version-drift/) i [repo-file-sync-action](https://github.com/BetaHuhn/repo-file-sync-action) (to ostatnie otwiera PR z plikami, czego świadomie nie robimy: `GITHUB_TOKEN` nie zapisuje workflow). Bierzemy: jedno zgłoszenie aktualizowane w miejscu i odcisk zmian. Nie bierzemy: automatycznego PR (sekcja „Aktualizacja wzorca w konsumencie”) ani nowej zależności. Wymagane kontrole i `pull_request_target`: dokumentacja GitHuba (linki wyżej). Dla statusu wymaganego na HEAD przyjęliśmy jawny commit status, bo wynik natywnego checka `pull_request_target` nie musi być przypisany do HEAD PR; pilot to potwierdza albo odrzuca.
 
 ## Zaufanie do kodu bramek
 
