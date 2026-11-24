@@ -167,7 +167,7 @@ test('pr: brak pliku wzorca w HEAD to rozjazd; dowiązanie, katalog i moduł zam
     const s = setup({ prs: { 1: pr(HEAD, { tree }) } });
     const { code, out } = await s.run(['pr'], { PR_NUMBER: '1' });
     assert.equal(code, 1, JSON.stringify(entry));
-    assert.match(out, new RegExp(`${f.FILE.replace(/\./g, '\\.')}: brak pliku`));
+    assert.ok(out.includes(`${f.FILE}: brak pliku`));
   }
 });
 
