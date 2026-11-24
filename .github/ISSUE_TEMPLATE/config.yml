@@ -1,0 +1,4 @@
+# Puste zgłoszenia wyłączone w interfejsie WWW. Zgłoszenia z CLI i konektorów szablonu nie wczytują,
+# więc pola, etykiety i podpis sprawdza autor, a stan audytu bramka audytu, nie sam szablon.
+# Odnośniki kontaktowe (np. zgłoszenie podatności prywatnie) dopisuje repozytorium lokalnie w `contact_links`.
+blank_issues_enabled: false
