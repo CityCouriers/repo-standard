@@ -75,6 +75,24 @@
       "sha256": "ed414ecf6b707f79175e48a070ea3fd9545065ff38b067d6ebb0bcecbb5c5b77"
     },
     {
+      "path": ".github/standard/labels/labels-core.json",
+      "kind": "exact",
+      "critical": true,
+      "sha256": "b41d842466d69f5c3478903ff3dd28240586f0d791b6ea28e30c8008131ef761"
+    },
+    {
+      "path": ".github/standard/labels/labels_sync.js",
+      "kind": "exact",
+      "critical": true,
+      "sha256": "57bbd1066d730c1d1821f8bfcfd9f93cd555c1dd633609edaab365627476d9d3"
+    },
+    {
+      "path": ".github/workflows/labels-sync.yml",
+      "kind": "exact",
+      "critical": true,
+      "sha256": "9d7d0b917ca8d27f8948bf635e4a859677722859ff3784e8b19dc0f01353ea58"
+    },
+    {
       "path": ".github/repo-standard.json",
       "kind": "param"
     }

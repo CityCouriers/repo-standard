@@ -1,0 +1,103 @@
+name: Sync GitHub labels
+
+# Synchronizacja etykiet z manifestem wzorca (element wzorca repo-standard): rdzeń `labels-core.json` i lokalny
+# `.github/labels.json`. Zapis tylko z domyślnej gałęzi: warunek joba `sync` jest w tym pliku, a ręczne uruchomienie
+# z innej gałęzi albo z `dry_run` (domyślnie true) biegnie jako `plan` z tokenem tylko do odczytu. Przy PR biegnie
+# wyłącznie kontrola offline (`check`) bez tokenu zapisu. Logika i testy żyją w `.github/standard/labels/`.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/labels.json
+      - .github/standard/labels/**
+      - .github/workflows/labels-sync.yml
+  pull_request:
+    paths:
+      - .github/labels.json
+      - .github/standard/labels/**
+      - .github/workflows/labels-sync.yml
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Tylko plan, bez zmian
+        type: boolean
+        default: true
+
+permissions: {}
+
+jobs:
+  check:
+    name: labels-check
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read  # odczyt manifestu etykiet; bez tokenu zapisu
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Kontrola manifestu (offline)
+        run: node .github/standard/labels/labels_sync.js check
+
+  plan:
+    name: labels-plan
+    if: github.event_name == 'workflow_dispatch' && (github.ref != 'refs/heads/main' || inputs.dry_run)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    concurrency:
+      group: labels-sync
+      cancel-in-progress: false
+    permissions:
+      contents: read  # odczyt manifestu etykiet
+      issues: read  # odczyt etykiet i ich użycia; bez zapisu
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Plan synchronizacji (bez zmian)
+        run: node .github/standard/labels/labels_sync.js sync --dry-run
+
+  sync:
+    name: labels-sync
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    concurrency:
+      group: labels-sync
+      cancel-in-progress: false
+    permissions:
+      contents: read  # odczyt manifestu etykiet
+      issues: write  # tworzenie, zmiana i (po kontroli użycia) usuwanie etykiet
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Synchronizacja i weryfikacja
+        run: node .github/standard/labels/labels_sync.js sync
