@@ -29,10 +29,11 @@ Wersja wzorcowa każdego elementu została wybrana według zachowania, nie wedł
 | --- | --- | --- |
 | bramka audytu zgłoszeń `audit:*` | stan audytu zgłoszeń w zakresie (priorytet P0-P2 albo ryzyko T2/T3): wyłącznie strona przeciwna autorowi wydaje ważny werdykt `/audit-ok` albo `/audit-changes`; autor jest ustalany z trzech zgodnych sygnałów (podpis, etykieta `by:agent`, aplikacja, przez którą powstała treść); edycja treści albo komendy unieważnia werdykt | `audit.active_since` |
 | triage | uzupełnia brakujące P, T i area z tabeli „Triage” w treści zgłoszenia, nakłada i zdejmuje `needs-triage`; wymagane rodziny są stałe: P, T, area | `triage.active_since` |
-| powiązanie PR ze zgłoszeniem | pierwsza linia opisu PR to `Fixes #n` albo `Refs #n`; zgłoszenie musi istnieć i być otwarte; ukryte słowa zamykające są błędem; PR Dependabota jest wyjątkiem | brak |
+| szablon PR i składnia powiązania | szablon `.github/PULL_REQUEST_TEMPLATE.md` (rodzaj `seed`) i wzorcowy parser pierwszej linii opisu: dokładnie `Fixes #n` (ostatni PR zgłoszenia, zamyka je przy scaleniu) albo `Refs #n` (PR częściowy), jedna składnia we wszystkich repozytoriach; szczegóły w sekcji „Szablon PR i powiązanie PR ze zgłoszeniem” | brak |
+| kontrola powiązania PR ze zgłoszeniem (osobny element) | zgłoszenie musi istnieć, nie być PR i być otwarte; słowa zamykające w tytule PR są błędem; PR Dependabota jest wyjątkiem; używa wzorcowego parsera | brak |
 | strażnik wersji roboczej | job zbiorczy: PR w Draft jest zawsze czerwony; poza Draft wymagane joby muszą mieć `success`, pozostałe `skipped`; brak wyniku albo wynik nieznany jest czerwony | `quality_gate.jobs`, `quality_gate.required` |
 | bramka przeglądu `review-gate` | zielona, gdy ostatni ważny werdykt strony przeciwnej wskazuje pełny SHA HEAD, powiązane zgłoszenia mają `audit:ok`, a zmiana plików bramek ma linię „Zmiana bramki: zaakceptowana”; kod z domyślnej gałęzi | `review_gate.protected_paths` |
-| etykiety | manifest standardu (`labels.standard.json`) scalany z lokalnym `labels.json`; synchronizacja zapisuje tylko z domyślnej gałęzi i weryfikuje stan po zmianie; etykieta spoza obu plików łamie zgodność | lokalny `labels.json` |
+| etykiety | rdzeń etykiet (`labels-core.json`: P, T, `blocked`, `needs-triage`, `by:agent`, `audit:*`) kopiowany bez zmian, plus lokalny `.github/labels.json` poza manifestem; synchronizacja zapisuje tylko z domyślnej gałęzi, w dwóch fazach, i weryfikuje stan po zmianie; rdzeń jest nieusuwalny; etykieta spoza obu plików łamie zgodność, ale nie jest ruszana | lokalny `.github/labels.json` |
 | skan sekretów `secret-scan` | gitleaks z przypiętą wersją i sumą SHA-256: zakres PR, push, ręczny `--all` i bieg tygodniowy `--all` | opcjonalny `.gitleaks.toml` |
 | kontrola workflow `workflow-lint` | actionlint z przypiętą wersją i sumą; osobny workflow z filtrem ścieżek, niewymagany | brak |
 | polityka workflow | wszystkie `uses:` spoza repozytorium na pełnym SHA z komentarzem wersji, `permissions: {}` na poziomie workflow, literalny runner GitHub-hosted dla wyzwalaczy PR | brak |
@@ -75,6 +76,55 @@ Parametr repozytorium: lista używanych rodzajów szablonów NIE jest jeszcze cz
 Tekst do stałego promptu agentów (szablon nie wczytuje się przy zakładaniu zgłoszenia z CLI i konektora): każda sekcja wnosi fakt, decyzję, wymaganie albo dowód; bez rytualnego `N/A`; jedna wartość na wiersz „Triage”; podpis strony jako ostatnia linia treści; sekret wklejony do zgłoszenia uznaj za ujawniony.
 
 Mapowanie nazw sekcji na szkic standardu treści zgłoszeń w organizacji (wersja wstępna, nie norma): Cel = cel; „Kontekst i ustalenia” = fakty i źródła; Zakres i „Poza zakresem” = zakres i wyłączenia; „Co zamyka” = kryteria akceptacji (identyfikatory `AC-1`); „Ryzyko i wycofanie” = ryzyka.
+
+## Szablon PR i powiązanie PR ze zgłoszeniem
+
+Trzy odrębne umowy, które nie są zlewane w jedną:
+
+1. **Sekcje szablonu** (markery w `manifest.json`).
+2. **Składnia powiązania PR ze zgłoszeniem** (jedna dla wszystkich repozytoriów; parser, wspólne przypadki testowe).
+3. **Podpis strony i powiązanie werdyktu z HEAD** (element „bramka przeglądu `review-gate`”): szablon dostarcza tylko miejsce na podpis; nie ustala, kto jest autorem i czy werdykt dotyczy bieżącego HEAD.
+
+### Szablon `.github/PULL_REQUEST_TEMPLATE.md`
+
+Rodzaj `seed`: kopiowany raz, potem `check` sprawdza wyłącznie markery. Markery (zapisane w `manifest.json`, każdy musi występować w pliku): `Fixes #<nr>` (pierwsza linia), `## Dowody`, `## Mutacje`, `## Ryzyko i wycofanie`, `Podpis:` (linia podpisu strony). Pozostałe sekcje są zalecane i nie są markerami; konsument może je zmienić albo usunąć: `## Co zmienia i po co`, `## Realizacja Kryteriów Akceptacji (AC)`, `## Czego nie sprawdzono`, `## Pochodzenie i zmiany względem źródła`, `## Przed Ready for review`.
+
+- Wzorzec: pierwsza linia i nagłówki kontraktowe z markerów; konwencje: pole niedotyczące to `N/A (powód)`, komentarze HTML to instrukcja, placeholdery stoją w nawiasach `<...>`.
+- Parametr (lokalnie w konsumencie, markerów nie zmienia): pozycje dowodów zależne od stosu, wiersz mutacji (narzędzie i format), nazwy lokalnych kontroli w „Przed Ready”, sekcje stosowe (przeglądarka, runtime, macierz testów), konwencja tytułu, gdy konsument ma kontrolę tytułu.
+- Sekcję lokalną dopisuje się pod markerami (albo w ich treści); nie zmienia się i nie usuwa linii z markerem. Zmiana nazwy markera to zmiana kontraktu: wpis w `manifest.json`, test w tym repozytorium i kontrola konsumenta w jednym wydaniu.
+- `Mutacje`: nagłówek jest kontraktem z kontrolą mutacji (kończy się na następnym nagłówku `#`/`##`); format wiersza (narzędzie, pola) jest lokalny. Dokumenty i konfiguracja: test zachowania na kopii zamiast narzędzia mutacyjnego.
+- Domyślna pierwsza linia to `Fixes #<nr>`: placeholder nie jest poprawnym numerem, więc niewypełniony szablon jest czerwony dla parsera.
+
+### Składnia powiązania (jedna we wszystkich repozytoriach)
+
+Decyzja właściciela z 2026-11-15: jedna składnia powiązania; `Fixes` zamyka zgłoszenie przy scaleniu, `Refs` dla PR-a częściowego. Parser: `.github/standard/pr-link/pr_link_syntax.js`, funkcja `parse(body)`; wspólne przypadki testowe: `.github/standard/pr-link/cases.json`.
+
+- **Miejsce:** pierwsza linia opisu PR. Znak BOM na początku jest ignorowany; końce linii LF i CRLF są równoważne. Pusta pierwsza linia, komentarz, odstęp albo cokolwiek przed słowem to błąd.
+- **Forma:** dokładnie `Fixes #<n>` albo `Refs #<n>`, gdzie `<n>` to liczba dodatnia bez zer wiodących, najwyżej 9 cyfr, zgłoszenie z tego repozytorium. Cała linia, bez dopisków, pogrubień, kropki i przecinka; dopuszczalne są wyłącznie spacje lub tabulatory na końcu linii.
+- **Wielkość liter:** dokładnie `Fixes` i `Refs`; inne warianty (`fixes`, `FIXES`, `Fix`, `Closes`, `Resolves`, `Ref`) są błędem.
+- **Dwukropek:** błąd (`Fixes: #n`, `Refs: #n`). Dwukropek nie ma znaczenia dla GitHuba, dlatego nie jest dopuszczony: parsery nie mają dwóch dialektów.
+- **Jedno zgłoszenie na PR:** `Fixes #a, #b`, `Fixes #a #b` i druga linia powiązania (`Fixes` albo `Refs` jako początek dalszej linii) to błędy.
+- **Słowa zamykające poza pierwszą linią:** błąd wszędzie indziej w treści: każde słowo zamykające GitHuba (`close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves`, `resolved`, wielkość liter bez znaczenia, z dwukropkiem lub bez) z odwołaniem do zgłoszenia (`#n`, `GH-n`, `właściciel/repo#n` albo adres zgłoszenia). Komentarze HTML niczego nie ukrywają i nie są wycinane przed oceną: parser skanuje całą treść, także komentarze (w tym zamknięte `--!>`), więc słowo zamykające z odwołaniem w komentarzu jest błędem tak samo jak poza nim. Uzasadnienie: traktowanie komentarzy przez GitHub nie jest tu zweryfikowane, a zły kierunek błędu zamykałby zgłoszenie. Konsekwencje: `Fixes #n` ukryte w komentarzu nie jest ignorowane (jest błędem), a pierwsza linia będąca komentarzem jest błędem (patrz Miejsce). Linia zaczynająca się od `Refs` jest drugim powiązaniem, ale `Refs` w środku linii (np. wewnątrz komentarza) nie jest powiązaniem i niczego nie zamyka.
+- **`Fixes` albo `Refs` jest wymagane:** brak obu (także placeholder `<nr>`) to błąd.
+- **Wynik:** `parse(body)` zwraca `{ kind, issue, errors }`. `kind` (`Fixes` albo `Refs`) i `issue` są ustawione, gdy pierwsza linia jest poprawna, a `errors` jest wtedy puste albo opisuje naruszenia w dalszej części. Kontrola PR traktuje niepuste `errors` jako czerwone, niezależnie od `kind`.
+- **Tytuł PR:** słowa zamykające z odwołaniem w tytule to błąd, ale parser opisu ich nie sprawdza (nie dostaje tytułu). Sprawdza je kontrola PR funkcją `titleErrors(title)` z tego samego modułu, wywołaną obok `parse(body)`.
+- **Poza parserem:** stan zgłoszenia (istnieje, nie jest PR, jest otwarte) sprawdza kontrola PR przez API; komunikaty commitów i komunikat squasha nie są objęte tą umową, więc szablon i parser nie obiecują, że żaden scalony PR nie zamknie zgłoszenia inaczej niż przez pierwszą linię.
+
+Dotychczasowe kontrole w repozytoriach organizacji różniły się: pierwsza linia albo dowolne miejsce w opisie, dwukropek wymagany, zabroniony albo opcjonalny, `Fixes` dozwolone albo zabronione, dodatkowe słowa (`Closes`, `Resolves`, `Ref`). Ta umowa je ujednolica; każda kontrola konsumenta jest zmieniana razem z kolejnym wydaniem wzorca, z własnym PR, audytem i mutacjami zmienionych plików. Do czasu wydania nic w konsumentach od tej umowy nie zależy.
+
+Wspólne przypadki (`cases.json`) przechodzi parser w tym repozytorium; kontrola PR w konsumencie ma przejść te same przypadki (część „body”: wynik `parse`, część „title”: wynik `titleErrors`).
+
+### Kolejność wdrożeń
+
+Szablon i parser wchodzą w wydaniu przed kontrolą PR w konsumencie; kontrole wszystkich konsumentów zmieniane są w jednej fali wydania. Kto wchodzi drugi (kontrola PR albo bramka przeglądu), dopisuje test krzyżowy zgodności z markerami i z przypadkami.
+
+### Testy tego elementu
+
+```bash
+node --test "tests/pr-template.test.js" "tests/pr-link-syntax.test.js"
+```
+
+`tests/pr-template.test.js` pilnuje zgodności szablonu z manifestem (każdy marker w pliku, każdy nagłówek kontraktowy ma marker), formy niewypełnionego szablonu (czerwony dla parsera, bez słowa zamykającego z numerem, bez placeholderów w formie `#nr`, zbalansowane komentarze), a także kontroli zerowej i ujemnej: szablon bez zmian jest zgodny z `check --self`, a kopia bez któregokolwiek markera jest odrzucona. Zwykły test (bez `todo`) sprawdza na rzeczywistym module `issue-audit-sides.js`, że oba podpisy z szablonu są rozpoznawane jako strona agenta lokalnego i ChatGPT, a niewypełniony szablon nie ustala żadnej strony.
 
 ## Plik parametrów `.github/repo-standard.json`
 
@@ -171,6 +221,54 @@ node --test "tests/*.test.js"
 ```
 
 Testy obejmują czytnik HTML-a (w tym model wyczerpujący wszystkie ciągi tokenów do długości 6), reconciler, parametry, kontrolę etykiet, log pominiętych werdyktów i kontrakt workflow. Pomiar mutacyjny jest wykonywany Strykerem na kopii poza repozytorium.
+
+## Etykiety
+
+Pliki: `.github/standard/labels/labels-core.json` (rdzeń), `.github/standard/labels/labels_sync.js` (walidacja, plan, synchronizacja) i `.github/workflows/labels-sync.yml`. Wszystkie trzy są `exact` i `critical` w manifeście. Node.js, wyłącznie biblioteka standardowa, bez zależności.
+
+**Rdzeń i część lokalna.** Rdzeń to etykiety, na których opiera się proces: priorytety `P0`-`P4`, ryzyka `T1`-`T3`, `blocked`, `needs-triage`, `by:agent` i `audit:pending`, `audit:changes`, `audit:ok`. Konsument kopiuje je bez zmian (opisy w ASCII z łącznikiem `-`, kolory stałe w rodzinach). Resztę opisuje lokalny plik `.github/labels.json`: `repo`, obszary `area:*` (co najmniej jeden), własne rodziny, klasyfikacja etykiet cudzych (`system` dla domyślnych etykiet GitHuba, `foreign` dla etykiet integracji) i `migrations`. Plik lokalny NIE jest wpisem `manifest.json`: `apply` go nie tworzy, nie nadpisuje i nie sprawdza jego sumy, a `check --self` go nie liczy do rozjazdu. Jego kontrakt (schemat, brak redefinicji nazw rdzenia, spójność prefiksów i kolorów rodzin, minimum jedna etykieta `area:`, `repo` zgodne z `GITHUB_REPOSITORY`) sprawdza `labels_sync.js check`, a brak pliku to błąd. Rozjazd rdzenia wykrywa `standard_sync.js check`; zmiany pliku lokalnego nie wykrywa, bo ta część należy do konsumenta. Przykład minimalnego pliku lokalnego: [`.github/labels.json`](.github/labels.json) w tym repozytorium.
+
+```json
+{
+  "schema": 1,
+  "repo": "wlasciciel/nazwa",
+  "families": { "area": { "prefix": "area:", "color": "0E8A16" } },
+  "labels": [ { "name": "area:docs", "color": "0E8A16", "family": "area", "description": "Dokumentacja." } ],
+  "system": ["bug", "documentation", "enhancement"],
+  "foreign": [],
+  "migrations": { "rename": [], "delete": [] }
+}
+```
+
+**Polecenia.**
+
+```bash
+node .github/standard/labels/labels_sync.js check
+node .github/standard/labels/labels_sync.js diff [--live plik.json] [--strict]
+node .github/standard/labels/labels_sync.js sync [--dry-run]
+```
+
+`check` działa offline. `diff` porównuje manifest z żywym stanem (z `--strict` rozjazd to kod 1). `sync` zapisuje zmiany; `--dry-run` tylko planuje i odczytuje użycie etykiet do usunięcia. Repozytorium: `--repo` albo `GITHUB_REPOSITORY`. Kody wyjścia: 0 zgodne, 1 rozjazd albo odmowa (konflikt nazw, etykieta w użyciu), 2 błąd działania (zły manifest, brak pliku, błąd sieci albo uprawnień). Walidacja i kontrole przed zapisem nie zostawiają żadnego zapisu.
+
+**Walidacja.** Nazwa do 50 znaków, opis (niepusty) do 100, kolor 6 znaków hex, tekst w NFC, bez znaków sterujących, bez U+FFFD i bez pauz w opisie; unikalność bez względu na wielkość liter; prefiks rodziny należy tylko do jej etykiet; etykieta lokalna nie może mieć nazwy rdzenia ani prefiksu rodziny rdzenia (`audit:`, `by:`); nieznane pola w plikach to błąd.
+
+**Etykiety nieznane.** Etykieta w repozytorium spoza rdzenia, pliku lokalnego, `system` i `foreign` jest niesklasyfikowana: łamie zgodność (kod 1 z `--strict` i po zapisie), ale nigdy nie jest usuwana ani zmieniana. Etykieta z `system` albo `foreign` nieobecna w repozytorium jest tylko odnotowana.
+
+**Zapis w dwóch fazach.** API GitHuba nie jest transakcyjne, więc skrypt nie obiecuje atomowości, tylko bezpieczny przebieg i możliwość wznowienia. Faza 1 (bez zapisu): walidacja, odczyt stanu, pełny plan, sprawdzenie konfliktów, odczyt użycia każdej etykiety do usunięcia i próba zapisu (aktualizacja istniejącej etykiety do jej własnych wartości). Faza 2: operacje w kolejności zmiana nazwy, utworzenie, poprawka, usunięcie, z linią logu dla każdej. Pierwszy błąd (np. 429, 403, 5xx) przerywa zapis kodem 2 i usunięcia nie są wykonywane. Ponowny bieg liczy plan od nowa ze stanu żywego, więc nie dubluje etykiet. Po zapisie skrypt czyta stan jeszcze raz i porównuje z manifestem; rozjazd to kod 1. Odczyt etykiet i zgłoszeń stronicuje do końca (`gh api --paginate`): błąd na dowolnej stronie albo wiersz, którego nie da się odczytać, to kod 2.
+
+**Rdzeń nieusuwalny, usuwanie lokalne.** Wpis w `migrations.delete` albo `migrations.rename` z nazwą rdzenia (w dowolnej wielkości liter) jest błędem walidacji, a wpis w `delete` musi być napisem: nie ma żadnej flagi „usuń mimo użycia”. Zmiana albo usunięcie etykiety rdzenia wymaga nowego wydania wzorca w wersji MAJOR, osobnego zgłoszenia i dowodu zachowania historii audytu. Usunięcie etykiety lokalnej wykonuje się tylko wtedy, gdy żadne zgłoszenie ani PR (wszystkie stany) jej nie ma: odczyt w fazie 1 i ponownie tuż przed usunięciem; etykieta w użyciu zatrzymuje całość (kod 1). Usunięcie etykiety w użyciu to osobna decyzja właściciela i ręczne zdjęcie przypisań poza skryptem.
+
+**Workflow.** `push` na domyślną gałąź (zmiany manifestu etykiet, skryptu albo workflow) uruchamia zapis; `pull_request` uruchamia tylko `check` offline, bez tokenu; `workflow_dispatch` ma `dry_run` domyślnie `true`. Zapis jest warunkiem joba na `refs/heads/main` i bez `dry_run`; inne uruchomienia biegną jako plan z `issues: read`. `permissions: {}` na poziomie workflow, minimalne uprawnienia w jobach, akcje na pełnym SHA, `persist-credentials: false`, `ubuntu-24.04`, token tylko przez `env`.
+
+**Zgodność z bramką audytu.** Bramka audytu nie tworzy etykiet i zatrzymuje się, gdy brakuje `audit:*`, `needs-triage` albo etykiet z tabeli „Triage”. Kolejność u konsumenta: najpierw synchronizacja etykiet, potem włączenie bramki. `area:*` z tabeli „Triage” musi istnieć w pliku lokalnym. Test zgodności pilnuje, żeby etykiety wymagane przez bramkę były w rdzeniu.
+
+**Uruchomienie testów.**
+
+```bash
+node --test "tests/labels-*.test.js"
+```
+
+Testy używają atrapy klienta GitHub i danych syntetycznych, bez sieci i bez `gh`; testy `apply` używają lokalnego serwera https jak pozostałe testy wzorca. Pomiar mutacyjny skryptu jest wykonywany Strykerem.
 
 ## Zaufanie do kodu bramek
 

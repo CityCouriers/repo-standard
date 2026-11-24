@@ -148,3 +148,18 @@ test('main: domyślny katalog to bieżący, składnia argumentów jest ścisła'
     h.rmDir(root);
   }
 });
+
+test('dowiązanie symboliczne .md nie jest szablonem (pomijane jak katalog), a zwykły zły plik obok jest wykrywany', (t) => {
+  const bad = VALID.replace('**Refs:**', '**R:**');
+  const root = sandbox({ 'prawdziwy.md': bad, 'config.yml': 'blank_issues_enabled: false\n' });
+  const dir = path.join(root, '.github', 'ISSUE_TEMPLATE');
+  try {
+    if (!h.trySymlink(path.join(dir, 'prawdziwy.md'), path.join(dir, 'dowiazanie.md'), 'file')) {
+      t.skip('brak możliwości tworzenia dowiązań na tym systemie');
+      return;
+    }
+    assert.deepEqual(contract.checkRoot(root).findings, ['prawdziwy.md: brak pola **Refs:**']);
+  } finally {
+    h.rmDir(root);
+  }
+});

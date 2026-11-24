@@ -4,6 +4,8 @@ Kod i dokumentacja tego repozytorium są własnością CityCouriers i wydawane n
 
 Skrypt `scripts/ci/privacy-scan.sh` i job `secret-scan` pochodzą z publicznego repozytorium `CityCouriers/pc` (commit `2538247b1`, ta sama organizacja i licencja MIT), ze zmianami wymienionymi w opisie pull requesta wprowadzającego.
 
+Skrypt `.github/standard/labels/labels_sync.js` jest przeniesieniem do Node.js zachowania synchronizatora etykiet z prywatnego repozytorium `tools` (walidacja manifestu, plan, tryb próbny, weryfikacja po zapisie), z poprawkami wymienionymi w opisie pull requesta wprowadzającego; manifest i workflow korzystają z rozwiązań publicznych repozytoriów `pc`, `wordpress-automation` i `cc-google-rating-badge` (ta sama organizacja i licencja MIT).
+
 | narzędzie | użycie | licencja | wersja i suma |
 | --- | --- | --- | --- |
 | gitleaks | skan sekretów | MIT | wersja 8.30.1 i SHA-256 w workflow `secret-scan` |

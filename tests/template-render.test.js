@@ -1,7 +1,8 @@
 'use strict';
 // Szablony zgłoszeń na wyrenderowanym HTML: TEN SAM czytnik tabeli „Triage” i lista stron podpisu co w bramce audytu
-// (importowane z plików bramki, bez kopii i bez atrapy). Gdy bramki audytu albo manifestu etykiet nie ma w `main`,
-// odpowiednie testy są oczekujące (pominięte z powodem), nie zielone. Dane wyłącznie syntetyczne.
+// (importowane z plików bramki, bez kopii i bez atrapy). Gdy bramki audytu albo manifestu etykiet nie ma w repozytorium,
+// odpowiednie testy są oczekujące (pominięte z powodem), nie zielone; po wdrożeniu etykiet brak ich plików to błąd.
+// Dane wyłącznie syntetyczne.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
